@@ -2071,7 +2071,7 @@ For a capstone project, we need a format that is:
 
 1. **Save after best validation:** Export model with best validation IoU (not final epoch)
 2. **Include metadata:** Save hyperparameters, data version, training metrics with model
-3. **Version control:** Don't commit large model files to Git (use Git LFS or external storage)
+3. **Version control:** Don't commit large model files to Git (store in cloud storage, document location)
 4. **Documentation:** Clearly document model version, training date, performance metrics
 5. **Testing:** Thoroughly test exported model before deployment
 6. **Backup:** Keep backup of exported model (don't rely on single copy)
@@ -3835,13 +3835,10 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Document selection rationale
 
 **1.3 Data Versioning Setup**
-- [ ] Set up external storage for large datasets (Google Drive, university storage, or cloud bucket)
-- [ ] Create data versioning strategy document
-- [ ] Set up Git LFS for small files (CSV metadata, config files, small GeoJSON)
-  - [ ] Configure `.gitattributes` for Git LFS
-  - [ ] Initialize Git LFS in repository
-- [ ] Create manual versioning system for large files (checksums, version logs)
-- [ ] Document data storage locations and access methods
+- [ ] Set up cloud storage for processed datasets (Google Drive, Dropbox, or GCP Cloud Storage)
+- [ ] Create `data/README.md` template for documenting dataset versions
+- [ ] Document storage location and access instructions
+- [ ] (Optional) Set up checksum calculation for data integrity verification
 
 **Week 2: Data Preprocessing & Quality Exploration**
 
@@ -3946,7 +3943,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 **Phase 1 Deliverables:**
 - ✅ Processed and organized datasets
 - ✅ Data quality exploration notebook with visualizations
-- ✅ Data versioning system set up
+- ✅ Data versioning documentation created (data/README.md with storage links)
 - ✅ Catalonia validation set created and documented
 - ✅ Train/val/test splits with geographic validation
 - ✅ Data preprocessing pipeline implemented and tested
@@ -4611,7 +4608,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 | **ML Framework** | PyTorch | Deep learning framework |
 | **Segmentation** | segmentation_models_pytorch | U-Net with pretrained encoders (ResNet-34 or EfficientNet-B0) |
 | **Experiment Tracking** | Weights & Biases (W&B) | Mandatory for training runs and hyperparameter tracking |
-| **Data Versioning** | Hybrid: External storage + Git LFS (small files only) | External storage for large datasets, Git LFS for CSV/configs, manual checksums |
+| **Data Versioning** | Cloud storage + Git documentation | Store processed data in cloud (Drive/Dropbox/GCP), document in `data/README.md` |
 | **Hyperparameter Tuning** | Optuna | 20-50 trials recommended |
 | **Geospatial Data** | rasterio, geopandas | Raster and vector data processing |
 | **Sentinel-2 Access** | sentinelsat, pystac-client, odc-stac | Copernicus Data Space API access |
@@ -4636,8 +4633,8 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 | **GeoJSON** | Standard JSON format for geographic data (polygons, coordinates) |
 | **WGS84** | World Geodetic System 1984 — standard web coordinate system (EPSG:4326) |
 | **UTM Zone 31N** | Universal Transverse Mercator — projected coordinate system for Catalonia (EPSG:32631) |
-| **DVC** | Data Version Control — tool for ML data versioning (alternative to Git LFS) |
-| **Git LFS** | Git Large File Storage — only for small files (CSV, configs) in this project |
+| **DVC** | Data Version Control — tool for ML data versioning (not required for this project) |
+| **Git LFS** | Git Large File Storage — optional for small files, not required (use cloud storage instead) |
 | **W&B** | Weights & Biases — experiment tracking platform (mandatory for this project) |
 | **Optuna** | Hyperparameter optimization framework |
 | **U-Net** | Encoder-decoder segmentation architecture with skip connections |
