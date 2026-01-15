@@ -34,30 +34,24 @@
 4. [Application Features](#4-application-features)
    - 4.1 [Core Features](#41-core-features)
    - 4.2 [Advanced Features](#42-advanced-features)
-5. [API Design](#5-api-design-simplified-for-capstone)
-   - 5.1 [Technology Choice](#51-technology-choice)
-   - 5.2 [Simplified Endpoint Summary](#52-simplified-endpoint-summary)
-   - 5.3 [Request/Response Schemas](#53-requestresponse-schemas)
-   - 5.4 [Authentication (Optional)](#54-authentication-optional)
-   - 5.5 [Error Codes](#55-error-codes)
-6. [User Interface](#6-user-interface-simplified-for-capstone)
-   - 6.1 [Technology Stack - Simplified Options](#61-technology-stack---simplified-options)
-   - 6.2 [Simplified UI Structure (Streamlit Example)](#62-simplified-ui-structure-streamlit-example)
-7. [Deployment](#7-deployment-simplified-for-capstone)
-   - 7.1 [Simplified Deployment Options](#71-simplified-deployment-options)
-   - 7.2 [Recommended Approach: Google Cloud Platform](#72-recommended-approach-google-cloud-platform)
-   - 7.3 [Alternative: Simple Cloud Deployment (If Needed)](#73-alternative-simple-cloud-deployment-if-needed)
-8. [Testing & Validation](#8-testing--validation)
-   - 8.1 [Testing Levels](#81-testing-levels)
-   - 8.2 [Catalonia Validation Set (Mandatory)](#82-catalonia-validation-set-mandatory)
-   - 8.3 [Performance Benchmarks](#83-performance-benchmarks)
-   - 8.4 [User Acceptance Testing](#84-user-acceptance-testing)
-9. [Project Timeline](#9-project-timeline)
-   - 9.1 [Phase Overview](#91-phase-overview)
-   - 9.2 [Detailed Implementation Plan](#92-detailed-implementation-plan)
-   - 9.3 [Task Dependencies & Critical Path](#93-task-dependencies--critical-path)
-   - 9.4 [Resource Requirements](#94-resource-requirements)
-   - 9.5 [Risk Mitigation in Timeline](#95-risk-mitigation-in-timeline)
+5. [User Interface](#5-user-interface-simplified-for-capstone)
+   - 5.1 [Technology Stack - Simplified Options](#51-technology-stack---simplified-options)
+   - 5.2 [Simplified UI Structure (Streamlit Example)](#52-simplified-ui-structure-streamlit-example)
+6. [Deployment](#6-deployment-simplified-for-capstone)
+   - 6.1 [Simplified Deployment Options](#61-simplified-deployment-options)
+   - 6.2 [Recommended Approach: Google Cloud Platform](#62-recommended-approach-google-cloud-platform)
+   - 6.3 [Alternative: Simple Cloud Deployment (If Needed)](#63-alternative-simple-cloud-deployment-if-needed)
+7. [Testing & Validation](#7-testing--validation)
+   - 7.1 [Testing Levels](#71-testing-levels)
+   - 7.2 [Catalonia Validation Set (Mandatory)](#72-catalonia-validation-set-mandatory)
+   - 7.3 [Performance Benchmarks](#73-performance-benchmarks)
+   - 7.4 [User Acceptance Testing](#74-user-acceptance-testing)
+8. [Project Timeline](#8-project-timeline)
+   - 8.1 [Phase Overview](#81-phase-overview)
+   - 8.2 [Detailed Implementation Plan](#82-detailed-implementation-plan)
+   - 8.3 [Task Dependencies & Critical Path](#83-task-dependencies--critical-path)
+   - 8.4 [Resource Requirements](#84-resource-requirements)
+   - 8.5 [Risk Mitigation in Timeline](#85-risk-mitigation-in-timeline)
 [Appendix](#appendix)
    - A. [Resource Links](#a-resource-links)
    - B. [Technology Stack Summary](#b-technology-stack-summary)
@@ -80,19 +74,20 @@ The wildfire detection system follows a multi-stage pipeline from satellite imag
 2. **Preprocessing:** Extract and normalize 7 spectral bands (B2, B3, B4, B8, B8A, B11, B12), resample to consistent resolution (20m), and extract 256×256 pixel patches
 3. **Model Inference:** Process patches through trained U-Net segmentation model to generate pixel-level fire probability maps
 4. **Post-processing:** Apply detection threshold, extract fire polygons from probability maps, filter small detections (<0.1 ha), and calculate fire area metrics
-5. **API Layer:** Expose detection functionality via REST API endpoints (FastAPI) for programmatic access
-6. **User Interface:** Provide interactive web dashboard (Streamlit) with map visualization, detection controls, and result export capabilities
+5. **User Interface:** Provide interactive web dashboard (Streamlit) with map visualization, detection controls, and result export capabilities. Model is loaded directly in Streamlit (no separate API needed).
 
-**Data Flow:** Satellite Imagery → Preprocessing → Model Inference → Post-processing → API/UI → User Results
+**Data Flow:** Satellite Imagery → Preprocessing → Model Inference → Post-processing → UI → User Results
+
+**Note:** API implementation is optional. See `optional_api_design.md` if you want to implement a separate API layer for separation of concerns.
 
 ### 1.3 Key Deliverables
 
 | Deliverable | Description |
 |-------------|-------------|
 | Trained Model | Segmentation model for fire/burned area detection |
-| REST API | Endpoints for detection, analysis, and alerts |
+| Web Dashboard | Interactive map with fire overlays and statistics (Streamlit) |
 | Web Dashboard | Interactive map with fire overlays and statistics |
-| Documentation | Technical docs, API reference, user guide |
+| Documentation | Technical docs, user guide, reproducibility guide |
 | Deployed System | Cloud-hosted, accessible application |
 
 ### 1.4 Success Criteria
@@ -103,7 +98,7 @@ The wildfire detection system follows a multi-stage pipeline from satellite imag
 | Model Dice Score | ≥ 0.80 | Harmonic mean of precision and recall, emphasizing overlap. Formula: `Dice = 2TP / (2TP + FP + FN)`. More forgiving than IoU for small fires. A score of 0.80 indicates strong overlap between predictions and ground truth. |
 | Detection Precision | ≥ 0.85 | Fraction of predicted fires that are actually real fires. Formula: `Precision = TP / (TP + FP)`. A score of 0.85 means 85% of detections are correct, minimizing false alarms. Critical for alert reliability. |
 | Detection Recall | ≥ 0.80 | Fraction of real fires that are successfully detected. Formula: `Recall = TP / (TP + FN)`. A score of 0.80 means the model catches 80% of actual fires. Important for not missing dangerous fires. |
-| API Response Time | < 30 seconds for single tile | Time from API request to response for processing one Sentinel-2 tile. Includes imagery fetching, model inference, and post-processing. Less critical for capstone than model metrics. |
+| UI Response Time | < 30 seconds for single tile | Time from user clicking "Run Detection" to results display. Includes imagery fetching, model inference, and post-processing. Less critical for capstone than model metrics. |
 | System Uptime | ≥ 99% | Percentage of time the system is available and operational. Less critical for capstone project where model quality is the primary focus. |
 
 ---
@@ -2598,266 +2593,9 @@ Advanced features demonstrate system potential beyond basic detection. For capst
 
 ---
 
-## 5. API Design (Simplified for Capstone)
+## 5. User Interface (Simplified for Capstone)
 
-API design defines how external systems (web UI, mobile apps, other services) interact with the wildfire detection system. For a capstone project, the API should be simple but demonstrate core functionality.
-
-**Design Philosophy:**
-
-- **Simplified for capstone:** Focus on demonstrating model inference, not production-ready features
-- **RESTful principles:** Use standard HTTP methods and status codes
-- **Clear contracts:** Well-defined request/response schemas
-- **Documentation:** Automatic API documentation for easy testing
-
----
-
-### 5.1 Technology Choice
-
-**Framework: FastAPI**
-
-**Why FastAPI?**
-
-| Framework | Pros | Cons | Verdict |
-|-----------|------|------|---------|
-| **FastAPI** | ✅ Async support<br>✅ Auto OpenAPI docs<br>✅ Type validation<br>✅ High performance<br>✅ Easy to learn | ⚠️ Python-only | **⭐ Recommended** |
-| Flask | ✅ Simple<br>✅ Widely used | ⚠️ No async (slower for I/O)<br>⚠️ Manual validation<br>⚠️ Manual docs | Good for simple APIs |
-| Django REST | ✅ Full framework<br>✅ Admin panel | ⚠️ Overkill for simple API<br>⚠️ More complex | Too heavy for capstone |
-
-**Rationale for FastAPI:**
-
-**Async support:**
-- **Why it matters:** Fetching satellite imagery is I/O-bound (waiting for external APIs)
-- **Performance:** Async allows handling multiple requests efficiently
-- **Real-world relevance:** Demonstrates modern API design patterns
-
-**Automatic OpenAPI documentation:**
-- **What it is:** Interactive API documentation (Swagger UI) generated automatically
-- **Why it matters:** Easy testing, clear API contract, professional appearance
-- **Capstone value:** Demonstrates API design best practices
-
-**Type hints and Pydantic validation:**
-- **What it is:** Request/response validation using Python type hints
-- **Why it matters:** Catches errors early, clear API contracts, better developer experience
-- **Academic value:** Shows understanding of modern Python practices
-
-**High performance:**
-- **Why it matters:** Fast response times improve user experience
-- **Benchmark:** FastAPI is one of the fastest Python frameworks
-- **Capstone note:** Performance is less critical for demo, but good practice
-
-**Simple to learn:**
-- **Why it matters:** Reduces learning curve, more time for model work
-- **Documentation:** Excellent documentation, many examples
-- **Community:** Large community, easy to find help
-
----
-
-### 5.2 Simplified Endpoint Summary
-
-**Why Simplified?**
-
-For capstone, the API should demonstrate core functionality without production complexity. Focus is on model inference, not enterprise features.
-
-**Simplified Features Rationale:**
-
-**Single synchronous endpoint:**
-- **Why:** Simplest to implement and understand
-- **Alternative:** Async jobs for long-running tasks (more complex, not needed for capstone)
-- **Trade-off:** Synchronous means users wait for response (acceptable for demo)
-
-**Basic health check:**
-- **Why:** Essential for deployment monitoring, simple to implement
-- **What it checks:** API is running, model is loaded, dependencies available
-- **Use case:** Deployment platforms (GCP Cloud Run) use health checks
-
-**Optional authentication:**
-- **Why optional:** Simplifies demo, no user management needed
-- **If implemented:** Simple API key in header (no database, no user accounts)
-- **Production note:** Real systems need proper authentication, but not for capstone
-
-**Removed complex features:**
-- **Alert subscriptions:** Requires database, user management - too complex for capstone
-- **Spread analysis:** Can be done client-side or omitted
-- **History tracking:** Requires database - can be simplified or omitted
-
-#### 5.2.1 Core Detection Endpoints
-
-**POST `/api/v1/detect`**
-
-**What it does:** Detects fires in satellite imagery for a given bounding box and date.
-
-**Why POST:**
-- **Request body:** Bounding box and date are complex parameters (not simple query params)
-- **Semantic correctness:** POST is appropriate for operations that process data
-- **Future extensibility:** Easy to add more parameters (threshold, bands, etc.)
-
-**Why `/api/v1/`:**
-- **Versioning:** Allows future API versions without breaking changes
-- **Best practice:** Standard REST API versioning pattern
-- **Capstone note:** v1 is sufficient, but shows understanding of API design
-
-**GET `/api/v1/health`**
-
-**What it does:** Returns API health status.
-
-**Why GET:**
-- **Idempotent:** Health check doesn't change state
-- **Cacheable:** Health status can be cached (though typically not)
-- **Standard:** Health checks are typically GET endpoints
-
-**Response fields:**
-- **Status:** "healthy" or "unhealthy"
-- **Model loaded:** Whether PyTorch model is loaded
-- **Dependencies:** Status of external services (Sentinel API, etc.)
-- **Timestamp:** When health check was performed
-
----
-
-### 5.3 Request/Response Schemas
-
-**Why Defined Schemas?**
-
-Clear request/response schemas ensure API contracts are well-defined, enable automatic validation, and make API easier to use and test.
-
-#### Detection Request
-
-**Bounding Box (bbox):**
-
-**Why bounding box:**
-- **Flexible region selection:** Users can analyze any geographic region
-- **Standard format:** Bounding boxes are standard in GIS and remote sensing
-- **Simple to specify:** Four coordinates (min_lon, min_lat, max_lon, max_lat)
-
-**Coordinate system:** WGS84 (EPSG:4326) - standard web coordinate system
-
-**Validation:**
-- **Range checks:** Longitude [-180, 180], Latitude [-90, 90]
-- **Order checks:** min_lon < max_lon, min_lat < max_lat
-- **Size limits:** Maximum bounding box size (e.g., 1° × 1°) to prevent excessive processing
-
-**Date:**
-
-**Why ISO format (YYYY-MM-DD):**
-- **Standard:** ISO 8601 is international standard for dates
-- **Unambiguous:** No confusion about date format (MM/DD vs DD/MM)
-- **Sortable:** ISO dates sort correctly as strings
-- **Validation:** Easy to validate format and range
-
-**Date constraints:**
-- **Past dates only:** Can't detect fires in future (satellite imagery is historical)
-- **Minimum date:** Sentinel-2 data available from 2015
-- **Maximum date:** Typically up to 2-3 days ago (processing delay)
-
-**Threshold:**
-
-**Why optional:**
-- **Default value:** 0.5 is reasonable default (balanced precision/recall)
-- **User control:** Advanced users may want to adjust threshold
-- **Flexibility:** Allows experimentation without code changes
-
-**Range:** 0.0 to 1.0 (probability range)
-
-#### Detection Response
-
-**Fire detected (boolean):**
-
-**Why boolean:**
-- **Quick check:** Users can quickly determine if any fire was found
-- **Simple logic:** Enables conditional behavior (alert if true, skip if false)
-- **Clear semantics:** Binary outcome is easy to understand
-
-**Total area (hectares):**
-
-**Why hectares:**
-- **Standard unit:** Fire area is typically reported in hectares
-- **Meaningful scale:** Appropriate for fire sizes
-- **User familiarity:** Emergency services use hectares
-
-**Fire areas (GeoJSON array):**
-
-**Why GeoJSON:**
-- **Standard format:** Widely supported by web maps and GIS software
-- **Self-contained:** Includes coordinates and metadata in single format
-- **Web-friendly:** JSON format works well with web applications
-
-**Why array:**
-- **Multiple fires:** Single image may contain multiple fire events
-- **Individual polygons:** Each fire gets its own polygon for detailed analysis
-- **Flexibility:** Can handle any number of fires
-
-**Processing time (seconds):**
-
-**Why include:**
-- **Performance monitoring:** Helps identify slow requests
-- **User feedback:** Users know how long operation took
-- **Debugging:** Helps identify performance bottlenecks
-- **Academic value:** Demonstrates understanding of performance metrics
-
----
-
-### 5.4 Authentication (Optional)
-
-**Why Optional for Capstone?**
-
-Authentication adds complexity (user management, tokens, security) that isn't essential for demonstrating model inference. For capstone demo, authentication can be skipped.
-
-**If Implemented: Simple API Key**
-
-**Why API key (not OAuth/JWT):**
-- **Simplicity:** API key is simplest authentication method
-- **Sufficient for demo:** Provides basic access control
-- **No user management:** No need for user accounts, passwords, registration
-- **Easy to implement:** Single header check, no complex token validation
-
-**Implementation:**
-- **Header:** `X-API-Key: your-api-key-here`
-- **Storage:** Environment variable or simple config file (not database)
-- **Validation:** Check API key matches configured key(s)
-
-**Production note:** Real systems need proper authentication (OAuth, JWT, user management), but API key is sufficient for capstone demo.
-
----
-
-### 5.5 Error Codes
-
-**Why Standard HTTP Codes?**
-
-Using standard HTTP status codes ensures API follows REST conventions, is easy to understand, and works well with HTTP clients and tools.
-
-**200 Success:**
-- **When:** Request processed successfully, fires detected or not detected
-- **Why:** Standard success code for GET/POST requests
-- **Response:** Always includes detection results (even if no fires found)
-
-**400 Bad Request:**
-- **When:** Invalid parameters (invalid bbox, invalid date format, out of range values)
-- **Why:** Client error - user provided invalid input
-- **Response:** Error message explaining what was wrong
-
-**404 Not Found:**
-- **When:** No satellite imagery available for requested date/region
-- **Why:** Resource not found - imagery doesn't exist
-- **Alternative:** Could use 400 (bad request), but 404 is more semantically correct
-
-**500 Internal Server Error:**
-- **When:** Server-side error (model loading failed, processing error, bug)
-- **Why:** Server error - not user's fault
-- **Response:** Generic error message (don't expose internal details)
-
-**503 Service Unavailable:**
-- **When:** External service down (Sentinel API unavailable, model not loaded)
-- **Why:** Service temporarily unavailable - different from 500 (permanent error)
-- **Response:** Error message indicating service is temporarily unavailable
-
-**Error Response Format:**
-- **Consistent structure:** All errors use same JSON format
-- **Error code:** HTTP status code
-- **Error message:** Human-readable error description
-- **Error details:** Optional additional information (for 400 errors, list invalid fields)
-
----
-
-## 6. User Interface (Simplified for Capstone)
+**Note:** API implementation is optional. If you want to implement a separate API layer (FastAPI) for separation of concerns, see `optional_api_design.md`. For this capstone, Streamlit can load the model directly without needing a separate API.
 
 The user interface (UI) is how end users interact with the wildfire detection system. For a capstone project, the UI should be functional and demonstrate model capabilities without excessive complexity.
 
@@ -2870,7 +2608,7 @@ The user interface (UI) is how end users interact with the wildfire detection sy
 
 ---
 
-### 6.1 Technology Stack - Simplified Options
+### 5.1 Technology Stack - Simplified Options
 
 **Why Simplified Options?**
 
@@ -2887,7 +2625,7 @@ For capstone, UI technology should minimize learning curve and development time,
 
 **Easy PyTorch integration:**
 - **Direct model loading:** Can load PyTorch model directly in Streamlit app
-- **No API needed:** Can call model directly (though API is still recommended for separation)
+- **No API needed:** Can call model directly - no separate API layer required
 - **Simple inference:** Model inference code works directly in Streamlit
 
 **Built-in map support:**
@@ -2923,7 +2661,7 @@ For capstone, UI technology should minimize learning curve and development time,
 
 **Direct API calls:**
 - **Simple integration:** Fetch API for HTTP requests
-- **No backend complexity:** UI just calls API endpoint
+- **No backend complexity:** UI loads model directly, no separate API layer needed
 - **Clear separation:** UI and model/API are separate
 
 **Limitations:**
@@ -2953,7 +2691,7 @@ For capstone, UI technology should minimize learning curve and development time,
 
 ---
 
-### 6.2 Simplified UI Structure (Streamlit Example)
+### 5.2 Simplified UI Structure (Streamlit Example)
 
 **Why This Structure?**
 
@@ -3058,7 +2796,7 @@ The UI structure should enable users to run fire detection and view results with
 
 ---
 
-## 7. Deployment (Simplified for Capstone)
+## 6. Deployment (Simplified for Capstone)
 
 Deployment makes the wildfire detection system accessible to users via the internet or local network. For a capstone project, deployment should be simple, cost-effective (using university credits), and demonstrate the working system.
 
@@ -3071,7 +2809,7 @@ Deployment makes the wildfire detection system accessible to users via the inter
 
 ---
 
-### 7.1 Simplified Deployment Options
+### 6.1 Simplified Deployment Options
 
 **Why Simplified Options?**
 
@@ -3147,7 +2885,7 @@ For capstone, deployment should be straightforward and require minimal infrastru
 
 ---
 
-### 7.2 Recommended Approach: Google Cloud Platform
+### 6.2 Recommended Approach: Google Cloud Platform
 
 **Why Google Cloud Platform?**
 
@@ -3233,14 +2971,14 @@ Google Cloud Platform provides the best balance of simplicity, functionality, an
 - [ ] Build Docker image with Cloud Build
 - [ ] Deploy to Cloud Run
 - [ ] Configure environment variables and resource limits
-- [ ] Test deployed system (health check, detection endpoint)
+- [ ] Test deployed system (UI loads, detection workflow works)
 - [ ] Set up budget alerts for credit monitoring
 - [ ] Document deployment URL and access instructions
 - [ ] Create demo video/screenshots of deployed system
 
 ---
 
-### 7.3 Alternative: Simple Cloud Deployment (If Needed)
+### 6.3 Alternative: Simple Cloud Deployment (If Needed)
 
 **When to Consider Alternatives:**
 
@@ -3287,7 +3025,7 @@ If GCP deployment has issues or team prefers different approach, consider these 
 
 ---
 
-## 8. Testing & Validation
+## 7. Testing & Validation
 
 Testing and validation ensure the system works correctly, performs well, and meets requirements. For a capstone project, comprehensive testing demonstrates system reliability and academic rigor.
 
@@ -3300,7 +3038,7 @@ Testing and validation ensure the system works correctly, performs well, and mee
 
 ---
 
-### 8.1 Testing Levels
+### 7.1 Testing Levels
 
 **Why Multiple Testing Levels?**
 
@@ -3436,7 +3174,7 @@ Model validation tests the trained model's performance on unseen data. This is t
 
 ---
 
-### 8.2 Catalonia Validation Set (Mandatory)
+### 7.2 Catalonia Validation Set (Mandatory)
 
 **Why Catalonia Validation Set is Mandatory?**
 
@@ -3498,7 +3236,7 @@ The project focuses on Catalonia, so the model must be validated specifically on
 
 ---
 
-### 8.3 Performance Benchmarks
+### 7.3 Performance Benchmarks
 
 Performance benchmarks measure system speed and capacity. They ensure the system is fast enough for practical use and can handle expected load.
 
@@ -3536,13 +3274,13 @@ Performance benchmarks measure system speed and capacity. They ensure the system
 - **Why important:** Tests system stability and resource handling
 
 **Performance Benchmarking Scope:**
-- **Focus on main operations:** Test detection endpoint, not every operation
+- **Focus on main operations:** Test detection workflow, not every operation
 - **Realistic scenarios:** Test with typical bounding box sizes, not edge cases
 - **Document results:** Include performance metrics in capstone report
 
 ---
 
-### 8.4 User Acceptance Testing
+### 7.4 User Acceptance Testing
 
 User acceptance testing (UAT) verifies that the system is usable and meets user needs. It tests the system from an end-user perspective, not a technical perspective.
 
@@ -3593,24 +3331,25 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 ---
 
-## 9. Project Timeline
+## 8. Project Timeline
 
-### 9.1 Phase Overview
+### 8.1 Phase Overview
 
 | Phase | Duration | Focus | Key Deliverables |
 |-------|----------|-------|-----------------|
 | Phase 1 | 3 weeks | Data preparation & exploration | Processed datasets, data quality report, Catalonia validation set |
 | Phase 2 | 4 weeks | Model development & optimization | Trained model, baseline comparisons, hyperparameter tuning results |
-| Phase 3 | 2 weeks | API development | Working FastAPI with detection endpoint |
-| Phase 4 | 2 weeks | UI development | Streamlit dashboard with map and controls |
-| Phase 5 | 1 week | Deployment | Deployed system on GCP Cloud Run |
-| Phase 6 | 2 weeks | Testing, validation & documentation | Comprehensive evaluation report, model card, documentation |
+| Phase 3 | 2 weeks | UI development | Streamlit dashboard with map and controls |
+| Phase 4 | 1 week | Deployment | Deployed system on GCP Cloud Run |
+| Phase 5 | 2 weeks | Testing, validation & documentation | Comprehensive evaluation report, model card, documentation |
 
-**Total: 14 weeks (includes buffer for unexpected delays)**
+**Total: 12 weeks (includes buffer for unexpected delays)**
+
+**Note:** API development is optional. If implementing an API, see `optional_api_design.md`. This adds 2 weeks (Phase 3 becomes API, Phase 4 becomes UI, etc.).
 
 ---
 
-### 9.2 Detailed Implementation Plan
+### 8.2 Detailed Implementation Plan
 
 #### Phase 1: Data Preparation & Exploration (Weeks 1-3)
 
@@ -3904,109 +3643,42 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 ---
 
-#### Phase 3: API Development (Weeks 8-9)
+#### Phase 3: User Interface Development (Weeks 8-9)
 
-**Week 8: FastAPI Setup & Core Endpoints**
+**Note:** API implementation is optional. If you want to implement a separate API layer, see `optional_api_design.md`. For this capstone, Streamlit can load the model directly without needing a separate API.
 
-**8.1 FastAPI Project Setup**
-- [ ] Create FastAPI project structure
-- [ ] Set up virtual environment and install dependencies
-- [ ] Create `requirements.txt` with all dependencies
-- [ ] Set up project configuration (config files, environment variables)
-- [ ] Create basic FastAPI app structure
+**Week 8: Streamlit Setup & Core Components**
 
-**8.2 Model Loading & Inference**
-- [ ] Implement model loading function (load PyTorch .pt model)
-- [ ] Implement inference function:
-  - [ ] Preprocess input imagery (normalization, patching)
-  - [ ] Run model forward pass
-  - [ ] Postprocess output (threshold, polygon extraction)
-- [ ] Test inference on sample imagery
-- [ ] Measure inference performance (latency)
-
-**8.3 Sentinel-2 Integration**
-- [ ] Set up Copernicus Data Space API access (or Sentinel Hub API)
-- [ ] Implement imagery fetching function:
-  - [ ] Query Sentinel-2 products by bounding box and date
-  - [ ] Download or stream imagery
-  - [ ] Handle API errors (rate limits, no data available)
-- [ ] Test imagery fetching with sample requests
-- [ ] Implement basic caching (optional, for demo)
-
-**8.4 Core Endpoints Implementation**
-- [ ] Implement `POST /api/v1/detect` endpoint:
-  - [ ] Request validation (bbox, date, optional threshold)
-  - [ ] Fetch Sentinel-2 imagery
-  - [ ] Run model inference
-  - [ ] Postprocess results (polygon extraction, area calculation)
-  - [ ] Return response (fire detected, total area, fire areas GeoJSON, processing time)
-- [ ] Implement `GET /api/v1/health` endpoint:
-  - [ ] Check API status
-  - [ ] Check model loaded status
-  - [ ] Check external dependencies (Sentinel API)
-  - [ ] Return health status
-- [ ] Test endpoints with sample requests
-- [ ] Implement error handling (400, 404, 500 errors)
-
-**Week 9: API Testing & Documentation**
-
-**9.1 API Testing**
-- [ ] Write unit tests for inference function
-- [ ] Write unit tests for preprocessing/postprocessing
-- [ ] Write integration tests for endpoints
-- [ ] Test error handling (invalid requests, API failures)
-- [ ] Test end-to-end pipeline (request → response)
-- [ ] Measure API performance (response times)
-
-**9.2 API Documentation**
-- [ ] Set up automatic OpenAPI documentation (FastAPI generates this)
-- [ ] Test Swagger UI (interactive API docs)
-- [ ] Write basic API usage guide
-- [ ] Document request/response schemas
-- [ ] Document error codes and messages
-
-**9.3 Optional Features**
-- [ ] Implement simple authentication (API key) if needed
-- [ ] Add request logging
-- [ ] Add basic rate limiting (if needed for demo)
-
-**Phase 3 Deliverables:**
-- ✅ FastAPI application with detection and health endpoints
-- ✅ Sentinel-2 imagery integration
-- ✅ Model inference pipeline integrated
-- ✅ API tested and documented
-- ✅ OpenAPI documentation available
-
----
-
-#### Phase 4: User Interface Development (Weeks 10-11)
-
-**Week 10: Streamlit Setup & Core Components**
-
-**10.1 Streamlit Project Setup**
+**8.1 Streamlit Project Setup**
 - [ ] Create Streamlit project structure
 - [ ] Install Streamlit and dependencies (`folium`, `geopandas`, etc.)
 - [ ] Set up Streamlit app entry point (`app.py` or `main.py`)
 - [ ] Configure Streamlit settings (page title, layout)
 
-**10.2 Map Component**
+**8.2 Map Component**
 - [ ] Implement interactive map using `folium`:
   - [ ] Set default view (Catalonia region)
   - [ ] Enable map interaction (pan, zoom)
   - [ ] Add bounding box selection tool (draw rectangle on map)
 - [ ] Test map component functionality
 
-**10.3 Detection Controls**
+**8.3 Model Integration & Detection Controls**
+- [ ] Implement model loading function (load PyTorch .pt model from Cloud Storage or local file)
+- [ ] Implement inference function:
+  - [ ] Preprocess input imagery (normalization, patching)
+  - [ ] Run model forward pass
+  - [ ] Postprocess output (threshold, polygon extraction)
+- [ ] Implement Sentinel-2 imagery fetching (Copernicus Data Space API)
 - [ ] Implement date picker (select date for imagery)
 - [ ] Implement bounding box input (from map selection or manual input)
 - [ ] Implement threshold slider (adjust detection threshold)
-- [ ] Implement "Run Detection" button
+- [ ] Implement "Run Detection" button (triggers: fetch imagery → preprocess → model inference → postprocess → display)
 - [ ] Add loading indicator during detection
-- [ ] Test controls and user interaction
+- [ ] Test end-to-end detection workflow
 
-**Week 11: Results Display & Export**
+**Week 9: Results Display & Export**
 
-**11.1 Results Display**
+**9.1 Results Display**
 - [ ] Implement fire polygon overlay on map:
   - [ ] Display detected fire polygons on map
   - [ ] Color-code polygons (e.g., red for fires)
@@ -4019,14 +3691,14 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Implement confidence map visualization (optional)
 - [ ] Test results display with sample detections
 
-**11.2 Export Functionality**
+**9.2 Export Functionality**
 - [ ] Implement GeoJSON download:
   - [ ] Convert fire polygons to GeoJSON format
   - [ ] Add download button
   - [ ] Test GeoJSON opens correctly in QGIS
 - [ ] Test export functionality
 
-**11.3 UI Polish & Testing**
+**9.3 UI Polish & Testing**
 - [ ] Basic styling (colors, fonts, layout)
 - [ ] Improve UI/UX (clear labels, helpful messages)
 - [ ] Test complete user workflow:
@@ -4037,39 +3709,42 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Test on different screen sizes (responsive design)
 - [ ] Create UI screenshots for documentation
 
-**Phase 4 Deliverables:**
+**Phase 3 Deliverables:**
 - ✅ Streamlit dashboard with interactive map
+- ✅ Model integrated (loads directly in Streamlit, no API needed)
+- ✅ Sentinel-2 imagery fetching integrated
 - ✅ Detection controls (date picker, bbox selection, threshold)
+- ✅ End-to-end detection workflow (fetch → preprocess → inference → postprocess → display)
 - ✅ Results display (fire polygons on map, statistics)
 - ✅ GeoJSON export functionality
 - ✅ Polished UI ready for demo
 
 ---
 
-#### Phase 5: Deployment (Week 12)
+#### Phase 4: Deployment (Week 10)
 
-**12.1 GCP Project Setup**
+**10.1 GCP Project Setup**
 - [ ] Set up GCP project with university account
 - [ ] Enable required APIs (Cloud Run, Cloud Storage, Cloud Build)
 - [ ] Link university billing account (uses credits)
 - [ ] Verify available credits are sufficient
 - [ ] Set up budget alerts for credit monitoring
 
-**12.2 Model Storage Setup**
+**10.2 Model Storage Setup**
 - [ ] Create Cloud Storage bucket for model files
 - [ ] Upload PyTorch model (.pt file) to Cloud Storage bucket
 - [ ] Set appropriate bucket permissions (private, accessible by Cloud Run)
 - [ ] Document model version and metadata
 - [ ] Test model download from Cloud Storage
 
-**12.3 Docker & Cloud Build Setup**
-- [ ] Create Dockerfile for application (FastAPI or Streamlit)
+**10.3 Docker & Cloud Build Setup**
+- [ ] Create Dockerfile for Streamlit application
 - [ ] Test Docker image locally (build and run)
 - [ ] Configure Cloud Build to build from Git repository
 - [ ] Set up Cloud Build triggers (automatic build on Git push)
 - [ ] Test Cloud Build process
 
-**12.4 Cloud Run Deployment**
+**10.4 Cloud Run Deployment**
 - [ ] Deploy container to Cloud Run
 - [ ] Configure Cloud Run service:
   - [ ] Set environment variables (model path, API keys, etc.)
@@ -4079,18 +3754,18 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Get Cloud Run HTTPS URL
 - [ ] Verify deployment succeeds
 
-**12.5 Deployment Testing**
+**10.5 Deployment Testing**
 - [ ] Test deployed system:
-  - [ ] Health check endpoint works
-  - [ ] Detection endpoint works with sample request
-  - [ ] UI loads and functions correctly (if Streamlit)
+  - [ ] Streamlit UI loads and functions correctly
+  - [ ] Model loads successfully from Cloud Storage
+  - [ ] Detection workflow works end-to-end (select region → detect → view results)
 - [ ] Test with real Catalonia region and recent date
 - [ ] Verify performance (response times acceptable)
 - [ ] Monitor Cloud Run logs for errors
 - [ ] Check credit usage (should be minimal)
 - [ ] Document deployment URL and access instructions
 
-**12.6 Demo Preparation**
+**10.6 Demo Preparation**
 - [ ] Create demo video:
   - [ ] Record screen showing complete workflow
   - [ ] Show detection on Catalonia region
@@ -4100,7 +3775,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Document deployment process (for reproducibility)
 - [ ] Document GCP resource usage and costs
 
-**Phase 5 Deliverables:**
+**Phase 4 Deliverables:**
 - ✅ System deployed on GCP Cloud Run
 - ✅ Model stored in Cloud Storage
 - ✅ Deployed system tested and working
@@ -4110,11 +3785,11 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 ---
 
-#### Phase 6: Testing, Validation & Documentation (Weeks 13-14)
+#### Phase 5: Testing, Validation & Documentation (Weeks 11-12)
 
-**Week 13: Comprehensive Testing**
+**Week 11: Comprehensive Testing**
 
-**13.1 Unit Testing**
+**11.1 Unit Testing**
 - [ ] Write unit tests for preprocessing functions:
   - [ ] Normalization, resampling, patching
   - [ ] Coordinate conversions
@@ -4126,7 +3801,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Endpoint validation, error handling, response format
 - [ ] Run unit test suite, fix any failures
 
-**13.2 Integration Testing**
+**11.2 Integration Testing**
 - [ ] Test end-to-end detection pipeline:
   - [ ] API request → imagery fetch → inference → postprocessing → response
 - [ ] Test Sentinel API integration:
@@ -4135,7 +3810,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Test alert system (if implemented)
 - [ ] Document integration test results
 
-**13.3 Model Validation (Final)**
+**11.3 Model Validation (Final)**
 - [ ] Final evaluation on test set:
   - [ ] Calculate all metrics (IoU, Dice, Precision, Recall, FPR, Pixel Accuracy)
   - [ ] Create confusion matrices
@@ -4153,7 +3828,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Test concurrent requests (10 simultaneous)
   - [ ] Document benchmark results
 
-**13.4 User Acceptance Testing**
+**11.4 User Acceptance Testing**
 - [ ] Test detection workflow:
   - [ ] User can select region, date, run detection
   - [ ] Workflow is intuitive and error-free
@@ -4167,9 +3842,9 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Dashboard usable on phone
 - [ ] Document UAT results and any issues found
 
-**Week 14: Documentation & Finalization**
+**Week 12: Documentation & Finalization**
 
-**14.1 Comprehensive Evaluation Report**
+**12.1 Comprehensive Evaluation Report**
 - [ ] Create evaluation report with:
   - [ ] Test set metrics (all metrics, confusion matrices)
   - [ ] Catalonia validation set metrics (separate section)
@@ -4181,7 +3856,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Include visualizations (curves, confusion matrices, example predictions)
 - [ ] Document all findings and recommendations
 
-**14.2 Model Documentation**
+**12.2 Model Documentation**
 - [ ] Finalize model card:
   - [ ] Architecture, hyperparameters, training data
   - [ ] Performance metrics, limitations, intended use
@@ -4190,7 +3865,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Training curves, validation results
   - [ ] Best hyperparameters and rationale
 
-**14.3 Data Documentation**
+**12.3 Data Documentation**
 - [ ] Document all datasets used:
   - [ ] Dataset names, sources, sizes, coverage
   - [ ] Download URLs and access methods
@@ -4205,7 +3880,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Creation process, data source
   - [ ] Ground truth creation methodology
 
-**14.4 Reproducibility Guide**
+**12.4 Reproducibility Guide**
 - [ ] Create reproducibility guide:
   - [ ] Environment setup instructions
   - [ ] Data download and preparation steps
@@ -4215,13 +3890,13 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Document all configuration files and parameters
 - [ ] Ensure code is well-commented and organized
 
-**14.5 Final Bug Fixes & Polish**
+**12.5 Final Bug Fixes & Polish**
 - [ ] Fix any bugs found during testing
 - [ ] Improve code quality (comments, documentation)
 - [ ] Ensure all code is properly version controlled
 - [ ] Create final project README with overview and setup
 
-**14.6 Presentation Preparation**
+**12.6 Presentation Preparation**
 - [ ] Prepare capstone presentation:
   - [ ] Project overview and objectives
   - [ ] Methodology (data, model, training)
@@ -4231,7 +3906,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Practice presentation
 - [ ] Prepare demo (live system or video)
 
-**Phase 6 Deliverables:**
+**Phase 5 Deliverables:**
 - ✅ Comprehensive evaluation report (test set, Catalonia validation, baselines, error analysis)
 - ✅ Model card and training report
 - ✅ Data documentation (datasets, preprocessing, splits)
@@ -4243,30 +3918,29 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 ---
 
-### 9.3 Task Dependencies & Critical Path
+### 8.3 Task Dependencies & Critical Path
 
 **Critical Path (Must Complete in Order):**
 1. Data preparation → Model training → Model evaluation
-2. Model training → API development → UI development
-3. API + UI development → Deployment
+2. Model training → UI development (model loaded directly in Streamlit)
+3. UI development → Deployment
 4. All development → Testing & Documentation
 
 **Parallel Work Opportunities:**
 - Data exploration can happen while downloading additional datasets
 - (Optional) Baseline models can be implemented while setting up U-Net (see `optional-basline-models-comparison.md`)
-- API documentation can be written while developing UI
 - Some documentation can be written incrementally during development
 
 **Key Milestones:**
 - **End of Week 3:** Data pipeline complete, ready for training
-- **End of Week 7:** Model trained and evaluated, ready for deployment
-- **End of Week 11:** UI complete, ready for deployment
-- **End of Week 12:** System deployed, ready for final testing
-- **End of Week 14:** All deliverables complete, ready for presentation
+- **End of Week 7:** Model trained and evaluated, ready for UI integration
+- **End of Week 9:** UI complete, ready for deployment
+- **End of Week 10:** System deployed, ready for final testing
+- **End of Week 12:** All deliverables complete, ready for presentation
 
 ---
 
-### 9.4 Resource Requirements
+### 8.4 Resource Requirements
 
 **Computing Resources:**
 - **GPU:** Recommended for model training (CUDA-capable GPU with 8GB+ VRAM)
@@ -4289,7 +3963,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 ---
 
-### 9.5 Risk Mitigation in Timeline
+### 8.5 Risk Mitigation in Timeline
 
 **Built-in Buffers:**
 - Extra week in Phase 1 (data preparation often takes longer than expected)
