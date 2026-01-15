@@ -46,7 +46,7 @@
    - 6.2 [Simplified UI Structure (Streamlit Example)](#62-simplified-ui-structure-streamlit-example)
 7. [Deployment](#7-deployment-simplified-for-capstone)
    - 7.1 [Simplified Deployment Options](#71-simplified-deployment-options)
-   - 7.2 [Recommended Approach: HuggingFace Spaces](#72-recommended-approach-huggingface-spaces)
+   - 7.2 [Recommended Approach: Google Cloud Platform](#72-recommended-approach-google-cloud-platform)
    - 7.3 [Alternative: Simple Cloud Deployment (If Needed)](#73-alternative-simple-cloud-deployment-if-needed)
 8. [Testing & Validation](#8-testing--validation)
    - 8.1 [Testing Levels](#81-testing-levels)
@@ -59,13 +59,6 @@
    - 9.3 [Task Dependencies & Critical Path](#93-task-dependencies--critical-path)
    - 9.4 [Resource Requirements](#94-resource-requirements)
    - 9.5 [Risk Mitigation in Timeline](#95-risk-mitigation-in-timeline)
-10. [Risks & Mitigations](#10-risks--mitigations)
-    - 10.1 [Technical Risks](#101-technical-risks)
-    - 10.2 [Data Risks](#102-data-risks)
-    - 10.3 [Schedule Risks](#103-schedule-risks)
-    - 10.4 [Academic & Quality Risks](#104-academic--quality-risks)
-    - 10.5 [Risk Monitoring & Response](#105-risk-monitoring--response)
-    - 10.6 [Risk Summary Table](#106-risk-summary-table)
 [Appendix](#appendix)
    - A. [Resource Links](#a-resource-links)
    - B. [Technology Stack Summary](#b-technology-stack-summary)
@@ -81,6 +74,17 @@
 Build a deep learning system that detects active wildfires and burned areas from Sentinel-2 satellite imagery, with a focus on the Catalonia region. The system will provide near-real-time detection capabilities, fire area measurement, spread analysis, and automated alerts.
 
 ### 1.2 High-Level Pipeline
+
+The wildfire detection system follows a multi-stage pipeline from satellite imagery acquisition to user-facing results:
+
+1. **Data Acquisition:** Fetch Sentinel-2 L2A satellite imagery from Copernicus Data Space Ecosystem for specified geographic regions and dates
+2. **Preprocessing:** Extract and normalize 7 spectral bands (B2, B3, B4, B8, B8A, B11, B12), resample to consistent resolution (20m), and extract 256×256 pixel patches
+3. **Model Inference:** Process patches through trained U-Net segmentation model to generate pixel-level fire probability maps
+4. **Post-processing:** Apply detection threshold, extract fire polygons from probability maps, filter small detections (<0.1 ha), and calculate fire area metrics
+5. **API Layer:** Expose detection functionality via REST API endpoints (FastAPI) for programmatic access
+6. **User Interface:** Provide interactive web dashboard (Streamlit) with map visualization, detection controls, and result export capabilities
+
+**Data Flow:** Satellite Imagery → Preprocessing → Model Inference → Post-processing → API/UI → User Results
 
 ### 1.3 Key Deliverables
 
@@ -306,7 +310,12 @@ Build a deep learning system that detects active wildfires and burned areas from
 | **PREVINCAT Dynamic Scenarios** | Hourly (on risk days) | Catalonia | Meteorological risk scenarios | PREVINCAT server | [PREVINCAT Server](https://previncat.ctfc.cat/en/index.html) |
 | **Ambee Fire API** | Hourly (fires), weekly (risk) | Global (NA forecasts) | Active fires + risk forecasts | REST API (tiered) | [API Documentation](https://www.getambee.com/api/fire), [Developer Portal](https://www.getambee.com/developers) |
 
-**Note on URL Validation:** All URLs in this section follow standard patterns for official government and research organization portals. A test script (`test_live_data_urls.sh`) is provided for local validation. Run it with: `bash test_live_data_urls.sh`
+**Note on URL Validation:** All URLs in this section follow standard patterns for official government and research organization portals. Test scripts are provided in the `tests/` directory for local validation:
+- `test_live_data_urls.sh` - Validates live data source URLs
+- `test_catalonia_urls.sh` - Validates Catalonia-specific data URLs
+- `test_python_library_urls.sh` - Validates Python library documentation URLs
+
+Run with: `bash tests/test_live_data_urls.sh`
 
 #### 2.2.3 Recommended Data Source Strategy
 
@@ -953,8 +962,8 @@ Analyze the pixel values in each Sentinel-2 band - are they in expected ranges? 
 **What to Report:**
 - Min, max, mean, std for each band across all patches
 - Histograms showing value distributions for each band
-- **Expected ranges:** Sentinel-2 L2A reflectance should be 0-1 (or 0-10000 if scaled). If values are outside this range, document the issue.
-- **Action items:** If values are 0-10000, document that division by 10000 is needed for normalization (see Section 2.3.2).
+- **Expected ranges:** Sentinel-2 L2A reflectance should be 0-1 (normalized) or 0-10000 (integer format). If values are 0-10000, they must be divided by 10,000 to normalize to 0-1 range (see Section 2.3.2 for normalization strategy). If values are outside this range, document the issue.
+- **Action items:** If values are 0-10000, document that division by 10000 is needed for normalization (see Section 2.3.2). Verify normalization is applied consistently across all bands.
 
 ---
 
@@ -1213,10 +1222,9 @@ The loss function measures how wrong the model's predictions are. For segmentati
 - **Tversky Loss:** To tune precision/recall trade-off explicitly (higher β = focus on recall)
 - **Weighted BCE:** Simple alternative, add `pos_weight` to BCE component for class imbalance
 
-**Loss Function Checklist:**
-
 **How to Do It:** Start with combined BCE + Dice Loss (0.5:0.5 weight) as default. Monitor both loss components separately during training to understand their contributions. If class imbalance is severe (fire pixels <1%), add pos_weight to BCE component or switch to Focal Loss. If recall is too low, try Tversky Loss with higher β parameter to focus on recall. If precision is too low, use Tversky Loss with higher α to focus on precision. Document final loss function, weights, and rationale in experiment tracking.
 
+**Loss Function Checklist:**
 - [ ] Implement combined BCE + Dice Loss (default)
 - [ ] Monitor both loss components separately
 - [ ] If class imbalance severe, add `pos_weight` to BCE or use Focal Loss
@@ -1276,7 +1284,7 @@ AdamW (Adam with Weight Decay) is the **modern standard** for deep learning opti
 - **Standard values:** These are the default and work well for most tasks
 - **Rarely changed:** Only adjust if you have specific convergence issues
 
-**Implementation:**
+**Implementation:** Use PyTorch to implement AdamW optimizer with specified parameters. Monitor training stability (loss should decrease smoothly) and adjust learning rate and weight decay if necessary. Document optimizer configuration and rationale in experiment tracking.
 
 **Optimizer Tuning Guidelines:**
 
@@ -1359,6 +1367,7 @@ Training hyperparameters control the **training process itself** - how many exam
    - Model overfits (large train/val gap)
 
 **Implementation:**
+Use PyTorch to implement batch size selection. Monitor training speed and memory usage during training. If batch size is too large, use mixed precision training (FP16) to reduce memory usage. Document batch size selection and rationale in experiment tracking.
 
 **Batch Size Effects:**
 
@@ -1418,6 +1427,7 @@ Training hyperparameters control the **training process itself** - how many exam
 - **Standard value:** Common practice in deep learning
 
 **Implementation:**
+Use PyTorch to implement mixed precision training. Check if GPU supports it (most modern GPUs do) and use `autocast()` for forward pass and `GradScaler()` for backward pass. Document mixed precision training and rationale in experiment tracking.
 
 ##### Mixed Precision Training (FP16)
 
@@ -1455,6 +1465,7 @@ Training hyperparameters control the **training process itself** - how many exam
 | **Epochs** | 50-100 | 30-150 | With early stopping, typically stops earlier |
 | **Early Stopping Patience** | 10 epochs | 5-20 | On validation IoU |
 | **Mixed Precision** | FP16 (enabled) | FP16/FP32 | Use if GPU supports it |
+| **Gradient Clipping** | Max norm = 1.0 | 0.5-2.0 | Stability, prevents gradient explosion |
 
 **Training Configuration Checklist:**
 
@@ -1465,8 +1476,8 @@ Training hyperparameters control the **training process itself** - how many exam
 - [ ] Epochs: 50-100 (with early stopping)
 - [ ] Early stopping: On validation IoU (patience=10)
 - [ ] Mixed precision: FP16 (if GPU supports it)
+- [ ] Gradient clipping: Max norm = 1.0 (for stability)
 - [ ] Monitor all hyperparameters in experiment tracking (W&B)
-| Gradient clipping | Max norm = 1.0 | Stability |
 
 #### 3.2.5 PyTorch DataLoader Configuration
 
@@ -1967,7 +1978,7 @@ Model export converts the trained PyTorch model into a format suitable for deplo
 
 For a capstone project, we need a format that is:
 - **Simple to use:** Easy to export and load
-- **Compatible:** Works with deployment platform (HuggingFace Spaces, Streamlit)
+- **Compatible:** Works with deployment platform (GCP Cloud Run, Streamlit)
 - **Reliable:** Produces same results as training model
 - **Well-documented:** Easy to understand and explain
 
@@ -1984,7 +1995,7 @@ For a capstone project, we need a format that is:
 - ✅ **Reliable:** Guaranteed to work with PyTorch (same framework as training)
 - ✅ **Complete:** Saves all model weights exactly as trained
 - ✅ **Easy to load:** Simple loading code, well-documented
-- ✅ **Compatible:** Works with HuggingFace Spaces, Streamlit, FastAPI
+- ✅ **Compatible:** Works with GCP Cloud Run, Streamlit, FastAPI
 - ✅ **No conversion errors:** No risk of conversion bugs or precision loss
 
 **Limitations:**
@@ -1994,7 +2005,7 @@ For a capstone project, we need a format that is:
 
 **When to Use:**
 - **⭐ Recommended for capstone** - simplest and most reliable
-- Python-based deployment (HuggingFace Spaces, Streamlit, FastAPI)
+- Python-based deployment (GCP Cloud Run, Streamlit, FastAPI)
 - When simplicity and reliability are more important than optimization
 
 **Export Process:**
@@ -2816,56 +2827,6 @@ Advanced features demonstrate system potential beyond basic detection. For capst
 - **Simple visualization:** Time series chart, basic statistics
 - **Skip complex analysis:** Seasonal patterns and comparisons may be omitted if time-constrained
 
-### 4.2 Advanced Features
-
-#### 4.2.1 Fire Spread Detection (Multi-temporal Analysis)
-
-| Feature | Description |
-|---------|-------------|
-| Temporal comparison | Compare detections from two dates |
-| Spread area | New fire areas (in T2 but not T1) |
-| Contained area | Fire areas that are no longer active (in T1 but not T2) |
-| Spread direction | Vector indicating predominant spread direction |
-| Spread rate | Hectares per day (if timestamps available) |
-| Spread alert | Boolean flag if fire is actively spreading |
-
-#### 4.2.2 Alert System
-
-**Alert Levels:**
-
-| Level | Criteria | Color |
-|-------|----------|-------|
-| LOW | < 1 hectare, not spreading | 🟡 Yellow |
-| MEDIUM | 1-10 hectares, or small but spreading | 🟠 Orange |
-| HIGH | 10-100 hectares, or medium and spreading | 🔴 Red |
-| CRITICAL | > 100 hectares, or large and rapidly spreading | ⚫ Black |
-
-**Alert Content:**
-- Timestamp (UTC)
-- Location (coordinates, nearest municipality)
-- Fire area (hectares)
-- Alert level
-- Spread status
-- Link to dashboard view
-
-#### 4.2.3 Notification Channels
-
-| Channel | Implementation |
-|---------|----------------|
-| Email | SMTP integration, HTML formatted alerts |
-| Webhook | POST to user-configured URL (Slack, Discord, custom) |
-| SMS | Twilio or similar (optional, higher priority alerts only) |
-| Push notification | Web push API for dashboard users |
-
-#### 4.2.4 Historical Analysis
-
-| Feature | Description |
-|---------|-------------|
-| Detection history | Database of all past detections |
-| Time series | Fire area over time for a region |
-| Seasonal patterns | Aggregated statistics by month/season |
-| Comparison | Current year vs historical average |
-
 ---
 
 ## 5. API Design (Simplified for Capstone)
@@ -2938,7 +2899,7 @@ For capstone, the API should demonstrate core functionality without production c
 **Basic health check:**
 - **Why:** Essential for deployment monitoring, simple to implement
 - **What it checks:** API is running, model is loaded, dependencies available
-- **Use case:** Deployment platforms (HuggingFace Spaces) use health checks
+- **Use case:** Deployment platforms (GCP Cloud Run) use health checks
 
 **Optional authentication:**
 - **Why optional:** Simplifies demo, no user management needed
@@ -3330,12 +3291,12 @@ The UI structure should enable users to run fire detection and view results with
 
 ## 7. Deployment (Simplified for Capstone)
 
-Deployment makes the wildfire detection system accessible to users via the internet or local network. For a capstone project, deployment should be simple, free, and demonstrate the working system.
+Deployment makes the wildfire detection system accessible to users via the internet or local network. For a capstone project, deployment should be simple, cost-effective (using university credits), and demonstrate the working system.
 
 **Deployment Philosophy:**
 
 - **Simplified for capstone:** Focus on getting system online, not production infrastructure
-- **Free options:** Use free tiers to avoid costs
+- **University credits:** Use Google Cloud Platform with university-provided free credits
 - **Time-efficient:** Choose deployment method that minimizes setup time
 - **Demonstration-focused:** Goal is to show working system, not enterprise deployment
 
@@ -3347,63 +3308,38 @@ Deployment makes the wildfire detection system accessible to users via the inter
 
 For capstone, deployment should be straightforward and require minimal infrastructure knowledge. Complex deployment (Kubernetes, cloud orchestration) is unnecessary.
 
-#### Option 1: HuggingFace Spaces (Recommended)
+#### Option 1: Google Cloud Platform (Recommended)
 
-**Why HuggingFace Spaces is Recommended:**
+**Why Google Cloud Platform is Recommended:**
 
-**Free hosting:**
-- **No cost:** Free tier sufficient for capstone demo
-- **Academic-friendly:** Designed for ML projects and demos
-- **No credit card:** No payment required
+**University credits:**
+- **Free credits:** University provides GCP credits for academic projects
+- **Cost-effective:** Credits sufficient for capstone demo (low traffic, limited duration)
+- **Academic-friendly:** GCP has good support for research and educational projects
 
 **Easy deployment:**
-- **Git-based:** Push code to Git repository, automatic deployment
-- **No infrastructure:** No servers, containers, or configuration needed
-- **Fast setup:** Can deploy in minutes, not hours
-
-**Built-in model hosting:**
-- **Model storage:** Can store model files in Space or HuggingFace model hub
-- **No external storage:** Don't need S3, Google Drive, or other storage services
-- **Version control:** Model versions can be tracked in HuggingFace
+- **Cloud Run:** Serverless container deployment - no server management
+- **Simple setup:** Deploy from Docker container or source code
+- **Automatic scaling:** Handles traffic automatically (scales to zero when not in use)
 
 **Framework support:**
-- **FastAPI:** Can deploy FastAPI applications
-- **Streamlit:** Can deploy Streamlit applications
-- **Gradio:** Alternative UI framework (if preferred)
+- **FastAPI:** Deploy FastAPI applications easily
+- **Streamlit:** Deploy Streamlit applications
+- **Any Python app:** Flexible deployment options
 
-**Zero infrastructure management:**
-- **No servers:** HuggingFace manages all infrastructure
-- **No scaling:** Automatic scaling handled by platform
-- **No monitoring:** Basic monitoring provided (can add custom if needed)
-
-**Limitations:**
-- **Resource limits:** Free tier has CPU/memory limits (sufficient for demo)
-- **Customization:** Less control over environment compared to self-hosted
-- **Dependencies:** Must use supported Python packages
-
-**When to use:** **⭐ Recommended for capstone** - best balance of simplicity and functionality.
-
-#### Option 2: Streamlit Cloud
-
-**Why consider Streamlit Cloud:**
-
-**Streamlit-specific:**
-- **Optimized for Streamlit:** Designed specifically for Streamlit apps
-- **Simple deployment:** Automatic deployment from GitHub
-- **Fast:** Very quick to deploy Streamlit apps
-
-**Free hosting:**
-- **No cost:** Free tier for public repositories
-- **Academic-friendly:** Good for academic projects
+**Integrated services:**
+- **Cloud Storage:** Store model files (.pt files) - simple and cost-effective
+- **Cloud Build:** Automatic builds from Git repository
+- **Cloud Logging:** Built-in logging and monitoring
 
 **Limitations:**
-- **Streamlit only:** Can't deploy FastAPI or other frameworks
-- **Less flexible:** More limited than HuggingFace Spaces
-- **GitHub required:** Must use GitHub (not GitLab, Bitbucket)
+- **Requires GCP account:** Need to set up GCP project (university provides access)
+- **Docker knowledge:** Need basic Docker understanding (Dockerfile required)
+- **Credit management:** Monitor credit usage to avoid unexpected costs
 
-**When to use:** If using Streamlit UI and want simplest possible deployment.
+**When to use:** **⭐ Recommended for capstone** - best balance of simplicity, functionality, and cost-effectiveness with university credits.
 
-#### Option 3: Local Docker Container
+#### Option 2: Local Docker Container
 
 **Why consider local deployment:**
 
@@ -3422,9 +3358,9 @@ For capstone, deployment should be straightforward and require minimal infrastru
 - **Requires Docker:** Users need Docker installed
 - **Local only:** Not suitable for remote demos or grading
 
-**When to use:** For in-person demos, presentations, or when internet is unreliable.
+**When to use:** For in-person demos, presentations, or as backup if GCP deployment has issues.
 
-#### Option 4: Google Colab
+#### Option 3: Google Colab
 
 **Why consider Google Colab:**
 
@@ -3442,64 +3378,94 @@ For capstone, deployment should be straightforward and require minimal infrastru
 
 ---
 
-### 7.2 Recommended Approach: HuggingFace Spaces
+### 7.2 Recommended Approach: Google Cloud Platform
 
-**Why HuggingFace Spaces?**
+**Why Google Cloud Platform?**
 
-HuggingFace Spaces provides the best balance of simplicity, functionality, and academic-friendliness for capstone projects.
+Google Cloud Platform provides the best balance of simplicity, functionality, and cost-effectiveness for capstone projects when university credits are available.
 
 **Advantages:**
-- **Simplest deployment:** Git push → automatic deployment
-- **Free:** No cost for academic projects
-- **Academic-focused:** Designed for ML demos and research projects
-- **Time-efficient:** Minimal setup time, more time for model work
-- **Professional appearance:** Clean URLs, good for presentations
+- **Serverless deployment:** Cloud Run handles infrastructure automatically
+- **Cost-effective:** University credits cover deployment costs
+- **Professional:** Industry-standard platform, good for presentations
+- **Scalable:** Can handle traffic spikes automatically
+- **Integrated:** Easy integration with other GCP services (Storage, Logging)
+
+**GCP Services Used:**
+
+| Service | Purpose | Why This Service |
+|---------|---------|------------------|
+| **Cloud Run** | Deploy FastAPI/Streamlit app | Serverless, pay-per-use, automatic scaling |
+| **Cloud Storage** | Store model files (.pt) | Simple, cost-effective file storage |
+| **Cloud Build** | Build Docker images from Git | Automated builds, integrates with Git |
+| **Cloud Logging** | Application logs | Built-in, no setup needed |
 
 **Setup Process:**
 
-**1. Create HuggingFace account:**
-- **Free signup:** No credit card required
-- **Academic email:** Use university email if available (may get additional benefits)
-- **Verification:** Email verification required
+**1. Set up GCP Project:**
+- **Create project:** Use university GCP account to create new project
+- **Enable APIs:** Enable Cloud Run, Cloud Storage, Cloud Build APIs
+- **Set billing:** Link university billing account (uses credits)
+- **Verify credits:** Confirm available credits are sufficient
 
-**2. Create new Space:**
-- **Space type:** Choose FastAPI or Streamlit (depending on UI choice)
-- **Visibility:** Public (required for free tier) or Private (if available)
-- **SDK:** Choose Python SDK
+**2. Prepare Docker Image:**
+- **Create Dockerfile:** Define container with Python, dependencies, app code
+- **Test locally:** Build and test Docker image locally before deploying
+- **Include model:** Copy model file (.pt) into Docker image or download from Cloud Storage at startup
 
-**3. Upload model and code:**
-- **Git integration:** Connect GitHub repository or upload files directly
-- **Model files:** Upload PyTorch model (.pt file) to Space or model hub
-- **Code:** Upload API/UI code, requirements.txt, README
+**3. Deploy to Cloud Run:**
+- **Build image:** Use Cloud Build to build Docker image from Git repository
+- **Deploy service:** Deploy container to Cloud Run
+- **Configure:** Set environment variables, memory, CPU limits
+- **Get URL:** Cloud Run provides HTTPS URL automatically
 
-**4. Automatic deployment:**
-- **Build process:** HuggingFace automatically builds and deploys
-- **URL:** Get public URL for your deployed system
-- **Updates:** Push to Git → automatic redeployment
+**4. Store Model in Cloud Storage:**
+- **Create bucket:** Create Cloud Storage bucket for model files
+- **Upload model:** Upload PyTorch model (.pt file) to bucket
+- **Update code:** Modify app to download model from Cloud Storage at startup (if not in image)
 
 **Storage Strategy:**
 
 **Model files:**
-- **Option 1:** HuggingFace model hub (recommended) - versioned, shareable
-- **Option 2:** Space storage - simpler, but less organized
-- **Size limits:** Free tier has storage limits (typically sufficient for single model)
+- **Option 1:** Cloud Storage bucket (recommended) - separate from container, easy updates
+- **Option 2:** Include in Docker image - simpler but larger images, requires rebuild to update
+- **Size considerations:** Model files (~100-500MB) fit easily in Cloud Storage
 
 **No database needed:**
 - **In-memory:** Use in-memory storage for demo (detections, alerts)
 - **Skip persistence:** For capstone demo, persistence is optional
-- **Alternative:** SQLite file if persistence needed (simple, no external service)
+- **Alternative:** Cloud SQL or Firestore if persistence needed (may use more credits)
 
 **No Redis/cache needed:**
 - **Simplified:** Skip caching for capstone demo
 - **Time savings:** Caching adds complexity without essential benefit
-- **Future work:** Can add caching if time allows
+- **Future work:** Can add Cloud Memorystore (Redis) if time allows
+
+**Cost Management:**
+
+**Monitor credit usage:**
+- **Cloud Run:** Pay per request and compute time (very low for demo traffic)
+- **Cloud Storage:** Pay per GB stored and operations (minimal for single model)
+- **Cloud Build:** Pay per build minute (only when deploying)
+- **Estimated cost:** <$10/month for low-traffic demo (well within university credits)
+
+**Best practices:**
+- **Set budget alerts:** Configure budget alerts to monitor credit usage
+- **Scale to zero:** Cloud Run scales to zero when not in use (saves credits)
+- **Clean up:** Delete unused resources (old images, test deployments)
 
 **Deployment Checklist:**
-- [ ] Create HuggingFace account
-- [ ] Create new Space (FastAPI or Streamlit)
-- [ ] Upload model to model hub or Space storage
-- [ ] Upload code (API/UI, requirements.txt)
+- [ ] Set up GCP project with university account
+- [ ] Enable required APIs (Cloud Run, Cloud Storage, Cloud Build)
+- [ ] Create Cloud Storage bucket for model files
+- [ ] Upload model file (.pt) to Cloud Storage
+- [ ] Create Dockerfile for application
+- [ ] Test Docker image locally
+- [ ] Build Docker image with Cloud Build
+- [ ] Deploy to Cloud Run
+- [ ] Configure environment variables and resource limits
 - [ ] Test deployed system (health check, detection endpoint)
+- [ ] Set up budget alerts for credit monitoring
 - [ ] Document deployment URL and access instructions
 - [ ] Create demo video/screenshots of deployed system
 
@@ -3509,7 +3475,7 @@ HuggingFace Spaces provides the best balance of simplicity, functionality, and a
 
 **When to Consider Alternatives:**
 
-If HuggingFace Spaces doesn't meet requirements (e.g., specific framework needs, resource limits, or team preference), consider these alternatives.
+If GCP deployment has issues or team prefers different approach, consider these alternatives.
 
 **Component-by-Component Approach:**
 
@@ -3519,9 +3485,9 @@ If HuggingFace Spaces doesn't meet requirements (e.g., specific framework needs,
 - **Why these:** Free, simple, sufficient for capstone demo
 
 **API/Model:**
-- **HuggingFace Spaces:** Still recommended for API deployment
-- **Railway (free tier):** Alternative if HuggingFace doesn't work (simple deployment, Docker-based)
-- **Why these:** Free tiers, simple deployment, no infrastructure management
+- **GCP Cloud Run:** Recommended primary option (uses university credits)
+- **Railway (free tier):** Alternative if GCP doesn't work (simple deployment, Docker-based)
+- **Why these:** Simple deployment, no infrastructure management
 
 **Database:**
 - **SQLite (file-based):** Simplest database option (no external service needed)
@@ -3529,21 +3495,26 @@ If HuggingFace Spaces doesn't meet requirements (e.g., specific framework needs,
 - **Why SQLite:** No setup required, works for simple persistence needs
 
 **Storage:**
-- **Local files:** Store files in deployment environment (simplest)
-- **HuggingFace storage:** Use HuggingFace model hub or Space storage
-- **Why not S3/Cloud Storage:** Adds complexity and potential costs, not needed for demo
+- **GCP Cloud Storage:** Recommended for model files (uses university credits)
+- **Local files in container:** Store files in Docker image (simpler but less flexible)
+- **Why Cloud Storage:** Easy updates, separate from container, cost-effective
 
 **Cost Analysis:**
 
-**Total cost: $0**
-- All recommended services have free tiers
-- Free tiers are sufficient for capstone demo (low traffic, single user)
-- No hidden costs or credit card required
+**With university credits:**
+- **GCP services:** Covered by university credits (monitor usage)
+- **Estimated usage:** <$10/month for low-traffic demo
+- **No out-of-pocket:** Credits should be sufficient for capstone duration
+
+**Without credits (backup plan):**
+- **Free tiers:** Streamlit Cloud, Railway free tier (limited)
+- **Local deployment:** Docker container (no cost)
+- **Total cost:** $0 if using free alternatives
 
 **When to use alternatives:**
-- **Specific requirements:** If HuggingFace Spaces doesn't support needed framework/features
+- **GCP access issues:** If university GCP account setup is delayed
 - **Team preference:** If team has experience with specific platform
-- **Resource needs:** If free tier limits are insufficient (unlikely for capstone)
+- **Credit limits:** If credits are insufficient (unlikely for capstone)
 
 ---
 
@@ -3863,7 +3834,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 | Phase 2 | 4 weeks | Model development & optimization | Trained model, baseline comparisons, hyperparameter tuning results |
 | Phase 3 | 2 weeks | API development | Working FastAPI with detection endpoint |
 | Phase 4 | 2 weeks | UI development | Streamlit dashboard with map and controls |
-| Phase 5 | 1 week | Deployment | Deployed system on HuggingFace Spaces |
+| Phase 5 | 1 week | Deployment | Deployed system on GCP Cloud Run |
 | Phase 6 | 2 weeks | Testing, validation & documentation | Comprehensive evaluation report, model card, documentation |
 
 **Total: 14 weeks (includes buffer for unexpected delays)**
@@ -3911,7 +3882,7 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 - [ ] Implement Sentinel-2 band selection (B2, B3, B4, B8, B8A, B11, B12)
 - [ ] Implement resolution harmonization (resample all bands to 10m or 20m)
 - [ ] Implement normalization (per-band min-max or z-score normalization)
-- [ ] Implement patch extraction (256×256 or 512×512 patches)
+- [ ] Implement patch extraction (256×256 patches)
 - [ ] Implement coordinate system handling (WGS84 ↔ UTM conversions)
 - [ ] Test preprocessing pipeline on sample images
 - [ ] Document preprocessing parameters and choices
@@ -4319,34 +4290,49 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 #### Phase 5: Deployment (Week 12)
 
-**12.1 HuggingFace Spaces Setup**
-- [ ] Create HuggingFace account (if not already created)
-- [ ] Create new Space (choose FastAPI or Streamlit SDK)
-- [ ] Configure Space settings (visibility, SDK, hardware)
-- [ ] Set up Git repository connection (or prepare files for upload)
+**12.1 GCP Project Setup**
+- [ ] Set up GCP project with university account
+- [ ] Enable required APIs (Cloud Run, Cloud Storage, Cloud Build)
+- [ ] Link university billing account (uses credits)
+- [ ] Verify available credits are sufficient
+- [ ] Set up budget alerts for credit monitoring
 
-**12.2 Model & Code Deployment**
-- [ ] Upload model to HuggingFace model hub (or Space storage):
-  - [ ] Upload PyTorch model (.pt file)
-  - [ ] Document model version and metadata
-- [ ] Upload code to Space:
-  - [ ] API code (if FastAPI) or Streamlit app (if Streamlit)
-  - [ ] `requirements.txt` with all dependencies
-  - [ ] `README.md` with setup instructions
-  - [ ] Configuration files
-- [ ] Test deployment build process
+**12.2 Model Storage Setup**
+- [ ] Create Cloud Storage bucket for model files
+- [ ] Upload PyTorch model (.pt file) to Cloud Storage bucket
+- [ ] Set appropriate bucket permissions (private, accessible by Cloud Run)
+- [ ] Document model version and metadata
+- [ ] Test model download from Cloud Storage
+
+**12.3 Docker & Cloud Build Setup**
+- [ ] Create Dockerfile for application (FastAPI or Streamlit)
+- [ ] Test Docker image locally (build and run)
+- [ ] Configure Cloud Build to build from Git repository
+- [ ] Set up Cloud Build triggers (automatic build on Git push)
+- [ ] Test Cloud Build process
+
+**12.4 Cloud Run Deployment**
+- [ ] Deploy container to Cloud Run
+- [ ] Configure Cloud Run service:
+  - [ ] Set environment variables (model path, API keys, etc.)
+  - [ ] Set memory and CPU limits
+  - [ ] Configure timeout settings
+  - [ ] Set minimum instances (0 for cost savings)
+- [ ] Get Cloud Run HTTPS URL
 - [ ] Verify deployment succeeds
 
-**12.3 Deployment Testing**
+**12.5 Deployment Testing**
 - [ ] Test deployed system:
   - [ ] Health check endpoint works
   - [ ] Detection endpoint works with sample request
   - [ ] UI loads and functions correctly (if Streamlit)
 - [ ] Test with real Catalonia region and recent date
 - [ ] Verify performance (response times acceptable)
+- [ ] Monitor Cloud Run logs for errors
+- [ ] Check credit usage (should be minimal)
 - [ ] Document deployment URL and access instructions
 
-**12.4 Demo Preparation**
+**12.6 Demo Preparation**
 - [ ] Create demo video:
   - [ ] Record screen showing complete workflow
   - [ ] Show detection on Catalonia region
@@ -4354,10 +4340,13 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
   - [ ] Keep video concise (3-5 minutes)
 - [ ] Create demo screenshots (key features, results)
 - [ ] Document deployment process (for reproducibility)
+- [ ] Document GCP resource usage and costs
 
 **Phase 5 Deliverables:**
-- ✅ System deployed on HuggingFace Spaces
+- ✅ System deployed on GCP Cloud Run
+- ✅ Model stored in Cloud Storage
 - ✅ Deployed system tested and working
+- ✅ Credit usage monitored and documented
 - ✅ Demo video and screenshots created
 - ✅ Deployment documentation
 
@@ -4563,631 +4552,6 @@ User acceptance testing (UAT) verifies that the system is usable and meets user 
 
 ---
 
-## 10. Risks & Mitigations
-
-Risk management identifies potential problems that could derail the project and develops strategies to prevent or mitigate them. For a capstone project, proactive risk management ensures timely completion and quality deliverables.
-
-**Risk Management Philosophy:**
-
-- **Proactive identification:** Identify risks early, before they become problems
-- **Prioritization:** Focus on high-impact, high-probability risks
-- **Practical mitigation:** Choose mitigation strategies that are feasible for capstone scope
-- **Continuous monitoring:** Review risks regularly and adjust strategies as needed
-
----
-
-### 10.1 Technical Risks
-
-Technical risks are problems related to technology, tools, or implementation that could prevent the system from working correctly or meeting performance targets.
-
-#### 10.1.1 Model Performance Risks
-
-**Risk: Model accuracy below target (IoU < 0.70)**
-
-**Impact:** High - Model performance is the primary success criterion for capstone
-
-**Probability:** Medium - Deep learning performance can be unpredictable
-
-**Why this risk exists:**
-- Insufficient training data or poor data quality
-- Model architecture not suitable for task
-- Hyperparameters not optimized
-- Class imbalance not handled properly
-- Overfitting to training data
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Use proven architecture:** U-Net with pretrained encoder (Section 3.1) - well-established for segmentation
-- **Comprehensive data exploration:** Identify and fix data quality issues early (Section 2.8)
-- **Proper class imbalance handling:** Implement loss weighting, weighted sampling, or focal loss (Section 2.6)
-- **Geographic validation split:** Ensure model generalizes, not just memorizes training regions (Section 2.5)
-- **Catalonia validation set:** Test transfer learning early (Section 8.2) - catch geographic bias before final evaluation
-
-**Response (if risk occurs):**
-- **Iterate on data augmentation:** Increase augmentation diversity, adjust parameters
-- **Hyperparameter tuning:** Run more Optuna trials, expand search space
-- **Try different encoder:** Switch from ResNet-34 to EfficientNet-B0 or vice versa
-- **Ensemble models:** Combine multiple models if single model insufficient
-- **Fine-tune on Catalonia data:** If transfer learning fails, fine-tune on Catalonia validation set
-- **Adjust success criteria:** If IoU consistently 0.65-0.70, document why and focus on other metrics
-
-**Early warning signs:**
-- Validation IoU plateaus below 0.65 after 20+ epochs
-- Large gap between training and validation metrics (overfitting)
-- Poor performance on Catalonia validation set (geographic bias)
-
----
-
-**Risk: Model training instability (loss doesn't converge, NaN values)**
-
-**Impact:** High - Training failure prevents model development
-
-**Probability:** Low - Modern frameworks handle this well, but can occur
-
-**Why this risk exists:**
-- Learning rate too high
-- Gradient explosion
-- Numerical instability in loss function
-- Data preprocessing errors (NaN/Inf values)
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Learning rate schedule:** Use ReduceLROnPlateau to automatically reduce LR (Section 3.2)
-- **Gradient clipping:** Implement gradient clipping (max_norm=1.0) to prevent explosion
-- **Data validation:** Check for NaN/Inf in preprocessing pipeline (Section 2.8)
-- **Loss function stability:** Use combined BCE+Dice loss (more stable than Dice alone)
-- **Mixed precision training:** Use automatic mixed precision (AMP) for numerical stability
-
-**Response (if risk occurs):**
-- **Reduce learning rate:** Lower initial LR (1e-5 instead of 1e-4)
-- **Check data:** Verify no NaN/Inf in input data
-- **Simplify model:** Temporarily use smaller model to test stability
-- **Check loss function:** Verify loss calculation is correct
-
----
-
-#### 10.1.2 Infrastructure & Integration Risks
-
-**Risk: Sentinel API rate limits or access issues**
-
-**Impact:** Medium - Prevents live data fetching, but can work with cached data
-
-**Probability:** Medium - Free tier APIs often have rate limits
-
-**Why this risk exists:**
-- Copernicus Data Space API has rate limits for free accounts
-- Sentinel Hub API requires account setup and may have limits
-- Network issues or API downtime
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Implement caching:** Cache fetched imagery to avoid repeated API calls
-- **Request queuing:** Queue requests and add delays between calls
-- **Multiple API options:** Support both Copernicus Data Space and Sentinel Hub (fallback)
-- **Test API access early:** Verify API access in Phase 1, not Phase 3
-- **Use batch requests:** Request multiple dates/regions in single call when possible
-
-**Response (if risk occurs):**
-- **Use cached data:** For demo, use pre-downloaded imagery instead of live fetch
-- **Reduce API calls:** Cache more aggressively, reuse imagery for multiple tests
-- **Alternative data source:** Use downloaded Sentinel-2 imagery from training datasets
-- **Simplify demo:** Show detection on pre-loaded imagery instead of live fetch
-
----
-
-**Risk: Integration complexity (APIs, libraries don't work together)**
-
-**Impact:** Medium - Delays development, but workarounds exist
-
-**Probability:** Medium - Multiple libraries and APIs increase integration risk
-
-**Why this risk exists:**
-- Multiple Python libraries with version conflicts
-- API authentication and setup complexity
-- Coordinate system conversions between libraries
-- Different data formats (raster, vector, GeoJSON)
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Use well-documented APIs:** Copernicus Data Space and Sentinel Hub have good documentation
-- **Build incrementally:** Test each component separately before integrating
-- **Version pinning:** Pin library versions in requirements.txt to avoid conflicts
-- **Isolated testing:** Test API integration in separate script before adding to main code
-- **Standard formats:** Use standard formats (GeoJSON, WGS84) to minimize conversions
-
-**Response (if risk occurs):**
-- **Simplify integration:** Use simpler library or manual implementation
-- **Mock external services:** Use mock data for development, integrate later
-- **Seek help:** Use library documentation, Stack Overflow, or community forums
-- **Alternative libraries:** Switch to alternative library if primary doesn't work
-
----
-
-**Risk: Deployment platform issues (HuggingFace Spaces)**
-
-**Impact:** Medium - Can use alternative deployment, but adds time
-
-**Probability:** Low - HuggingFace Spaces is stable, but can have issues
-
-**Why this risk exists:**
-- Platform downtime or maintenance
-- Resource limits (CPU, memory, storage)
-- Build failures due to dependencies or configuration
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Test deployment early:** Deploy minimal version early to test platform
-- **Document dependencies:** Clear requirements.txt, test locally first
-- **Resource monitoring:** Check resource usage, optimize if needed
-- **Alternative ready:** Have backup deployment option (Streamlit Cloud, local Docker)
-
-**Response (if risk occurs):**
-- **Use alternative platform:** Switch to Streamlit Cloud or local Docker
-- **Simplify deployment:** Reduce dependencies, use smaller model
-- **Local demo:** Deploy locally for demo if cloud deployment fails
-
----
-
-#### 10.1.3 Resource & Cost Risks
-
-**Risk: Cloud costs exceed budget (if using paid services)**
-
-**Impact:** Medium - May need to switch to free alternatives
-
-**Probability:** Low - All recommended services have free tiers sufficient for capstone
-
-**Why this risk exists:**
-- Accidental use of paid services
-- Exceeding free tier limits
-- Misconfiguration leading to charges
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Use free tiers only:** HuggingFace Spaces, W&B, Copernicus Data Space all have free tiers
-- **Set billing alerts:** If using any paid service, set up billing alerts
-- **Monitor usage:** Check resource usage regularly
-- **Avoid paid services:** Don't use AWS, GCP, Azure unless absolutely necessary
-
-**Response (if risk occurs):**
-- **Switch to free alternatives:** Use HuggingFace Spaces instead of paid cloud
-- **Reduce usage:** Use smaller datasets, fewer API calls
-- **Local resources:** Use local GPU or CPU instead of cloud
-
----
-
-**Risk: GPU availability for training**
-
-**Impact:** High - Training without GPU is very slow
-
-**Probability:** Low - Multiple free GPU options available
-
-**Why this risk exists:**
-- Google Colab GPU quotas may be limited
-- University GPU resources may be unavailable
-- Local GPU may not be available
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Multiple GPU options:** Identify Google Colab, university resources, local GPU
-- **Start training early:** Begin training as soon as data is ready
-- **Optimize training:** Use smaller batch sizes, fewer epochs if GPU limited
-- **CPU fallback:** Can train on CPU (slow but possible)
-
-**Response (if risk occurs):**
-- **Use Google Colab:** Free GPU available (may have quotas)
-- **Reduce training:** Smaller model, fewer hyperparameter trials
-- **CPU training:** Accept slower training, start earlier
-- **University resources:** Request access to university GPU cluster
-
----
-
-### 10.2 Data Risks
-
-Data risks are problems related to datasets, data quality, or data availability that could prevent successful model training or evaluation.
-
-#### 10.2.1 Data Quality & Generalization Risks
-
-**Risk: Training data doesn't generalize to Catalonia**
-
-**Impact:** High - Model must work on Catalonia (project requirement)
-
-**Probability:** Medium - Geographic transfer learning can fail
-
-**Why this risk exists:**
-- Training data from different regions (not Catalonia)
-- Different vegetation, climate, fire characteristics
-- Geographic bias in training data
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Catalonia validation set (mandatory):** Create and test early (Section 8.2)
-- **Geographic validation split:** Ensure test set includes diverse regions (Section 2.5)
-- **Include Spanish data:** Use CEMS-Wildfire which includes Spanish fires
-- **Data augmentation:** Augment with geographic diversity (rotation, scaling)
-- **Monitor geographic performance:** Track performance by region during training
-
-**Response (if risk occurs):**
-- **Fine-tune on Catalonia data:** Fine-tune model on Catalonia validation set
-- **Increase Catalonia data:** Add more Catalonia-specific training data
-- **Transfer learning adjustments:** Adjust learning rate, freeze/unfreeze layers
-- **Document limitations:** If performance lower on Catalonia, document why and analyze
-
----
-
-**Risk: Dataset quality issues (annotation errors, misalignment)**
-
-**Impact:** Medium - Poor data quality reduces model performance
-
-**Probability:** Low - Datasets are well-curated, but errors can exist
-
-**Why this risk exists:**
-- Human annotation errors
-- Misalignment between imagery and masks
-- Incorrect coordinate systems
-- Missing or corrupted data
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Thorough data exploration:** Comprehensive quality checks (Section 2.8)
-  - Visual inspection of random samples
-  - Check mask alignment with imagery
-  - Verify coordinate systems
-  - Check for missing data
-- **Use authoritative sources:** CEMS-Wildfire from Copernicus (official source)
-- **Validate preprocessing:** Verify preprocessing doesn't introduce errors
-- **Document data issues:** Record any quality issues found
-
-**Response (if risk occurs):**
-- **Clean problematic data:** Remove or fix erroneous samples
-- **Use alternative dataset:** Switch to different dataset if primary has issues
-- **Manual correction:** Manually correct critical errors if feasible
-- **Document limitations:** Note data quality issues in final report
-
----
-
-#### 10.2.2 Data Availability Risks
-
-**Risk: Cloud cover limits available imagery**
-
-**Impact:** Medium - Reduces available training/evaluation data
-
-**Probability:** Medium - Cloud cover is common in satellite imagery
-
-**Why this risk exists:**
-- Sentinel-2 imagery often has cloud cover
-- Catalonia validation set may have limited clear imagery
-- Live detection may encounter cloudy dates
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Cloud filtering:** Filter out heavily clouded images (Section 2.8)
-- **Multiple dates:** Use multiple dates per fire event (not just single date)
-- **Cloud masks:** Use provided cloud masks to exclude clouded pixels
-- **Temporal flexibility:** Allow date range selection, not just single date
-
-**Response (if risk occurs):**
-- **Use alternative dates:** Select different dates with less cloud cover
-- **Accept partial cloud:** Train/evaluate on partially clouded images
-- **Cloud-aware evaluation:** Evaluate only on clear pixels (using cloud masks)
-- **Document cloud impact:** Analyze and document how cloud cover affects performance
-
----
-
-**Risk: Dataset download/access issues**
-
-**Impact:** Medium - Delays data preparation phase
-
-**Probability:** Low - Datasets are publicly available, but access can be slow
-
-**Why this risk exists:**
-- Large dataset sizes (slow downloads)
-- HuggingFace dataset viewer limitations
-- Network issues or server downtime
-- Access restrictions or authentication issues
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Start downloads early:** Begin downloading datasets in Week 1
-- **Multiple sources:** Have backup datasets ready (CEMS-Wildfire, EO4WildFires)
-- **Prioritize core dataset:** Focus on CEMS-Wildfire first (primary dataset)
-- **Use university network:** May have faster download speeds
-- **Download in background:** Download while working on other tasks
-
-**Response (if risk occurs):**
-- **Use smaller subset:** Work with available data, download more later
-- **Alternative dataset:** Switch to alternative dataset if primary unavailable
-- **Manual download:** Use browser or wget if HuggingFace API fails
-- **Extend Phase 1:** Add time buffer if downloads are slow
-
----
-
-### 10.3 Schedule Risks
-
-Schedule risks are problems that could cause project delays, preventing timely completion of deliverables.
-
-#### 10.3.1 Development Timeline Risks
-
-**Risk: Model training takes longer than expected**
-
-**Impact:** Medium - Delays model development, but buffers included
-
-**Probability:** Medium - Training time is hard to predict
-
-**Why this risk exists:**
-- Hyperparameter tuning requires many trials
-- Model may need more epochs to converge
-- GPU availability may be limited
-- Iterative improvements require multiple training runs
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Start training early:** Begin as soon as data is ready (Week 4)
-- **Use GPU:** Significantly faster than CPU training
-- **Limit search space:** Focused hyperparameter ranges (Section 3.4)
-- **Early stopping:** Stop training if no improvement (prevents wasted time)
-- **Buffer time:** Extra week included in Phase 2 (4 weeks instead of 3)
-
-**Response (if risk occurs):**
-- **Reduce hyperparameter trials:** 20 trials instead of 50 if time limited
-- **Use smaller model:** Faster training, may still meet targets
-- **Parallel training:** Train multiple models simultaneously if resources allow
-- **Accept current performance:** If close to target, document and proceed
-
----
-
-**Risk: Data preparation takes longer than expected**
-
-**Impact:** Medium - Delays entire project timeline
-
-**Probability:** Medium - Data preparation is complex and time-consuming
-
-**Why this risk exists:**
-- Multiple datasets to download and process
-- Data exploration is comprehensive (10 checklist items)
-- Catalonia validation set creation is detailed
-- Preprocessing pipeline is complex
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Extended Phase 1:** 3 weeks allocated (instead of 2)
-- **Start immediately:** Begin data exploration while downloading
-- **Prioritize core tasks:** Focus on essential datasets and tasks first
-- **Parallel work:** Data exploration can happen during downloads
-- **Incremental approach:** Process one dataset at a time, don't wait for all
-
-**Response (if risk occurs):**
-- **Simplify data exploration:** Focus on critical checks, skip less important ones
-- **Use smaller datasets:** Work with subset if full dataset too large
-- **Defer non-critical tasks:** Postpone advanced preprocessing if time limited
-- **Extend Phase 1:** Use buffer from later phases if needed
-
----
-
-**Risk: Learning curve for new tools (W&B, Optuna, FastAPI, Streamlit)**
-
-**Impact:** Medium - Delays development, but tools are relatively simple
-
-**Probability:** High - Team may not be familiar with all tools
-
-**Why this risk exists:**
-- Multiple new tools to learn (W&B, Optuna, FastAPI, Streamlit, geospatial libraries)
-- Limited time to learn each tool
-- Tool-specific issues or bugs
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Choose simple tools:** W&B, Streamlit are user-friendly (Section 3.5, Section 6.1)
-- **Start early:** Set up W&B in Phase 1, learn tools incrementally
-- **Good documentation:** All recommended tools have excellent documentation
-- **Tutorials:** Use official tutorials and examples
-- **Allocate extra time:** Phase 1 has extra week for learning
-
-**Response (if risk occurs):**
-- **Simplify tool usage:** Use basic features only, skip advanced features
-- **Alternative tools:** Switch to simpler alternatives if needed
-- **Seek help:** Use documentation, tutorials, Stack Overflow
-- **Pair programming:** Team members can help each other learn
-
----
-
-#### 10.3.2 Scope & Feature Risks
-
-**Risk: Scope creep (adding too many features)**
-
-**Impact:** Medium - Delays completion, reduces focus on ML work
-
-**Probability:** Medium - Temptation to add features is common
-
-**Why this risk exists:**
-- Desire to make system more impressive
-- Adding features seems easy but takes time
-- Unclear priorities between ML and application features
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Clear priorities:** ML work is primary focus (Section 1.1)
-- **Simplified features:** API and UI are simplified for capstone (Sections 5, 6)
-- **Feature list:** Stick to planned features, defer others
-- **Regular reviews:** Review progress weekly, catch scope creep early
-
-**Response (if risk occurs):**
-- **Defer non-essential features:** Postpone advanced features to "future work"
-- **Simplify existing features:** Reduce complexity of planned features
-- **Focus on ML:** Prioritize model quality over UI polish
-- **Document deferred features:** Note what was planned but not implemented
-
----
-
-**Risk: Testing and documentation takes longer**
-
-**Impact:** Medium - Delays final deliverables, but buffers included
-
-**Probability:** High - Testing and documentation always take longer than expected
-
-**Why this risk exists:**
-- Comprehensive testing is time-consuming
-- Documentation requires careful writing
-- Bug fixes discovered during testing
-- Evaluation report is extensive
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Extended Phase 6:** 2 weeks allocated for testing and documentation
-- **Incremental documentation:** Write documentation during development, not just at end
-- **Early testing:** Start testing components as they're completed
-- **Template preparation:** Prepare report templates early
-
-**Response (if risk occurs):**
-- **Prioritize critical documentation:** Focus on evaluation report, model card
-- **Simplify testing:** Focus on essential tests, skip exhaustive edge cases
-- **Accept minor bugs:** Fix critical bugs only, document known issues
-- **Use templates:** Use provided templates to speed up documentation
-
----
-
-### 10.4 Academic & Quality Risks
-
-Academic risks are problems related to meeting capstone requirements, academic standards, or evaluation criteria.
-
-#### 10.4.1 Evaluation & Success Criteria Risks
-
-**Risk: Model doesn't meet success criteria (IoU < 0.70)**
-
-**Impact:** High - Primary success criterion not met
-
-**Probability:** Medium - Target is achievable but not guaranteed
-
-**Why this risk exists:**
-- Success criteria are ambitious but realistic
-- Model performance can be unpredictable
-- Data or training issues may prevent reaching target
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Proven architecture:** U-Net is well-established for segmentation
-- **Comprehensive training:** Proper hyperparameter tuning, data augmentation
-- **Early validation:** Test on validation set regularly during training
-- **Catalonia validation:** Test transfer learning early (catch issues before final evaluation)
-
-**Response (if risk occurs):**
-- **Document thoroughly:** Explain why target wasn't met, what was tried
-- **Focus on other metrics:** Highlight strong performance on other metrics (Dice, Precision, Recall)
-- **Error analysis:** Comprehensive error analysis shows understanding despite lower IoU
-- **Baseline comparison:** Show improvement over baselines (demonstrates value)
-- **Academic discussion:** Discuss limitations, future improvements (shows critical thinking)
-
----
-
-**Risk: Insufficient documentation for reproducibility**
-
-**Impact:** Medium - Reduces academic rigor, but can be fixed
-
-**Probability:** Low - Documentation is planned, but may be incomplete
-
-**Why this risk exists:**
-- Documentation is time-consuming
-- May forget to document some steps
-- Reproducibility requires detailed documentation
-
-**Mitigation Strategies:**
-
-**Prevention:**
-- **Reproducibility guide:** Planned in Phase 6 (Section 9.2)
-- **Incremental documentation:** Document as you go, not just at end
-- **Version control:** Use Git to track code changes
-- **Data versioning:** Document data versions and preprocessing (Section 2.7)
-- **Configuration files:** Save all hyperparameters and configs
-
-**Response (if risk occurs):**
-- **Add missing documentation:** Fill gaps in reproducibility guide
-- **Code comments:** Add comments to code explaining key steps
-- **README:** Comprehensive README with setup instructions
-- **Document known issues:** Note any reproducibility limitations
-
----
-
-### 10.5 Risk Monitoring & Response
-
-**How to Monitor Risks:**
-
-**Weekly risk review:**
-- Review project progress against timeline
-- Identify new risks as they emerge
-- Check early warning signs (Section 9.5)
-- Adjust mitigation strategies if needed
-
-**Key indicators to watch:**
-- **Week 3:** Data preparation progress (should be 80% complete)
-- **Week 6:** Model training progress (should have initial trained model)
-- **Week 10:** UI development progress (should have working prototype)
-- **Week 13:** Testing progress (should have most tests complete)
-
-**When to escalate:**
-- **High-impact risks:** If high-impact risk occurs, prioritize mitigation immediately
-- **Cascading risks:** If one risk causes others, address root cause
-- **Timeline delays:** If more than 1 week behind, adjust scope or timeline
-
-**Response procedures:**
-
-**Immediate response:**
-1. Identify the risk that occurred
-2. Assess impact and urgency
-3. Implement mitigation strategy (from risk table)
-4. Monitor effectiveness
-5. Adjust if needed
-
-**Documentation:**
-- Document any risks that occurred
-- Note how they were mitigated
-- Include in final report if relevant
-- Learn from risks for future projects
-
----
-
-### 10.6 Risk Summary Table
-
-| Risk Category | Highest Priority Risks | Mitigation Status |
-|---------------|----------------------|-------------------|
-| **Technical** | Model accuracy below target | ✅ Multiple prevention strategies, early validation |
-| **Technical** | API rate limits | ✅ Caching, multiple API options |
-| **Data** | Training data doesn't generalize | ✅ Catalonia validation set (mandatory), early testing |
-| **Data** | Cloud cover limits imagery | ✅ Cloud filtering, multiple dates |
-| **Schedule** | Training takes longer | ✅ Buffer time, GPU usage, early start |
-| **Schedule** | Learning curve for tools | ✅ Simple tools chosen, extra time allocated |
-| **Academic** | Success criteria not met | ✅ Proven architecture, comprehensive training |
-
-**Overall Risk Assessment:**
-
-**Project risk level: Medium**
-- Most risks have effective mitigation strategies
-- Buffers included in timeline
-- Multiple alternatives for critical components
-- Focus on ML work (reduces application complexity risks)
-
-**Confidence in success: High**
-- Well-planned timeline with buffers
-- Proven technologies and architectures
-- Comprehensive risk mitigation strategies
-- Clear priorities and scope
-
----
 
 ## Appendix
 
