@@ -689,6 +689,8 @@ The primary goals are:
 
 #### 2.6.7 Implementation Checklist
 
+**How to Do It:** Start by calculating fire pixel percentage across all training patches. If fire pixels <5%, implement loss weighting first (calculate pos_weight as ratio of negative to positive pixels). Monitor training metrics from first epoch - if recall remains low (<70%), add weighted sampling to ensure each batch contains fire examples. After training, evaluate using confusion matrix and ROC/PR curves to assess class imbalance impact. Document all strategies used and their effectiveness.
+
 - [ ] Calculate class distribution in training data (fire vs. non-fire pixel ratio)
 - [ ] Implement loss weighting with appropriate `pos_weight`
 - [ ] Monitor per-class metrics from the first epoch
@@ -802,8 +804,6 @@ Git LFS (Large File Storage) is a Git extension that stores large files outside 
 - Store checksums and documentation in Git
 - Manually verify checksums before using data
 
-**Manual Versioning Workflow:**
-
 **Manual Versioning Requirements:**
 - ✅ Store checksums (MD5 or SHA256) for all files
 - ✅ Document dataset version, date, source, preprocessing steps
@@ -812,6 +812,8 @@ Git LFS (Large File Storage) is a Git extension that stores large files outside 
 - ✅ Verify checksums before using data: `md5sum -c data-checksums-v1.txt`
 
 #### 2.7.5 Data Versioning Requirements for This Project
+
+**How to Do It:** Create a systematic versioning workflow: download datasets to external storage, compute checksums (MD5 or SHA256) for all files, store checksums and metadata in Git. Use clear naming convention with version numbers and dates. For each dataset version, document preprocessing parameters, split indices, and link to experiment tracking. Store small files (CSV, configs) in Git LFS, keep large datasets externally with access instructions. Tag important versions in Git and maintain a changelog documenting changes between versions.
 
 **Minimum Requirements:**
 - [ ] Version all datasets with clear naming (e.g., `cems-wildfire-v1-2026-01-15`)
@@ -832,18 +834,12 @@ Git LFS (Large File Storage) is a Git extension that stores large files outside 
 - [ ] Store data processing scripts with data versions
 - [ ] Document storage location and access instructions
 
-**Data Version Naming Convention:**
-
-**Version Documentation Template:**
-
 #### 2.7.6 Integration with Experiment Tracking
 
 **Link Data Versions to Experiments:**
 - In W&B (Weights & Biases), log data version as a tag or config parameter
 - In MLflow, store data version in experiment metadata
 - In DVC, use `dvc.yaml` to track data → model pipeline
-
-**Example W&B Integration:**
 
 This ensures you can always identify which data version was used for each experiment.
 
@@ -872,7 +868,7 @@ Calculate the percentage of pixels labeled as "fire" vs "non-fire" across all tr
 - **Dataset quality:** If fire pixels are >10%, the dataset might be biased toward fire events (good for training, but may not reflect real-world distribution).
 - **Baseline expectations:** Helps set realistic performance targets (e.g., if only 0.5% of pixels are fire, even a naive "always predict no fire" model gets 99.5% accuracy).
 
-**How to Do It:**
+**How to Do It:** Iterate through all training patches, count fire pixels (where mask value = 1) and non-fire pixels (where mask value = 0), calculate percentage. Create a histogram showing fire pixel percentage distribution across patches. Aggregate statistics per dataset to compare class imbalance between different data sources.
 
 **What to Report:**
 - Overall fire pixel percentage across all datasets
@@ -912,7 +908,7 @@ Analyze when fires occur - are they concentrated in certain months (fire season)
 - **Temporal bias:** If all data is from 2017-2019, the model may not generalize to 2024+ (though this is less critical for capstone).
 - **Split strategy:** Ensures train/val/test splits don't have temporal overlap (no data leakage).
 
-**How to Do It:**
+**How to Do It:** Extract fire event dates from dataset metadata (acquisition date or fire occurrence date), group by year and month, create histograms showing temporal distribution. Identify fire season by finding months with peak fire counts. Analyze temporal gaps to ensure diversity across years and seasons.
 
 **What to Report:**
 - Histogram of fires by year
@@ -932,7 +928,7 @@ Calculate how much cloud cover exists in the imagery - are patches heavily cloud
 - **Filtering strategy:** Need to decide threshold for discarding patches (e.g., discard if >50% cloud cover).
 - **Dataset size:** After filtering, how much usable data remains?
 
-**How to Do It:**
+**How to Do It:** Use Sentinel-2 Scene Classification Layer (SCL) or cloud mask bands to calculate cloud percentage per patch. For each patch, count cloud pixels (SCL value = 3, 8, 9, or 10) divided by total pixels. Create histogram of cloud cover percentages across all patches. Count patches exceeding thresholds to determine filtering impact.
 
 **What to Report:**
 - Histogram of cloud cover percentages
@@ -952,7 +948,7 @@ Analyze the pixel values in each Sentinel-2 band - are they in expected ranges? 
 - **Data corruption:** Outliers may indicate corrupted files or processing errors.
 - **Sensor issues:** Unusual values might indicate sensor artifacts or calibration problems.
 
-**How to Do It:**
+**How to Do It:** For each Sentinel-2 band (B2, B3, B4, B8, B8A, B11, B12), compute statistics (min, max, mean, std) across all patches. Create histograms showing value distributions per band. Identify outliers by checking for values outside expected range (0-10000 for integer format, 0-1 for normalized). Flag any bands with unusual distributions or extreme outliers.
 
 **What to Report:**
 - Min, max, mean, std for each band across all patches
@@ -972,7 +968,7 @@ Check for missing values (NaN, None, or invalid values) in imagery and masks.
 - **Data quality:** Missing data indicates corrupted files or processing errors.
 - **Preprocessing:** Need to handle missing data before training (fill, interpolate, or discard).
 
-**How to Do It:**
+**How to Do It:** Load each image and mask patch, check for NaN (Not a Number) or Inf (Infinity) values using numpy functions. Count total NaN/Inf pixels per patch and flag patches exceeding threshold (e.g., >1% NaN). Identify specific files with problematic values. Document location and extent of missing data to determine if files should be discarded or repaired.
 
 **What to Report:**
 - Count of files with NaN or Inf values
@@ -994,7 +990,7 @@ Ensure that fire masks (ground truth) are correctly aligned with the correspondi
 - **Annotation errors:** Misalignment indicates annotation mistakes or coordinate system issues.
 - **Model performance:** Even small misalignments (1-2 pixels) can hurt performance.
 
-**How to Do It:**
+**How to Do It:** Overlay fire mask (ground truth) on corresponding satellite imagery using transparency or color blending. Visually inspect alignment by checking if fire pixels in mask correspond to visible burn scars, smoke plumes, or charred areas in the RGB composite. Check multiple patches across different regions and fire types. Verify pixel-level alignment by comparing mask boundaries with visible fire edges in imagery.
 
 **What to Report:**
 - Visual grid showing 9-16 sample patches with mask overlay
@@ -1178,6 +1174,8 @@ U-Net is the **industry standard** for semantic segmentation in remote sensing. 
 
 **Input/Output Validation Checklist:**
 
+**How to Do It:** Create validation functions that check input tensor shapes and value ranges before model forward pass. Verify input has correct dimensions (batch, 7 channels, 256×256 spatial) and all values are normalized [0.0, 1.0]. After model inference, verify output shape (batch, 1 channel, 256×256) and probability range [0.0, 1.0]. Test spatial alignment by comparing input and output coordinates. Run threshold optimization on validation set using ROC/PR curves to find optimal threshold. Document all validation checks and band selection rationale.
+
 - [ ] Verify input shape is `(batch_size, 7, 256, 256)`
 - [ ] Verify input values are in range `[0.0, 1.0]` (normalized)
 - [ ] Verify all 7 bands are present and in correct order (B2, B3, B4, B8, B8A, B11, B12)
@@ -1216,6 +1214,8 @@ The loss function measures how wrong the model's predictions are. For segmentati
 - **Weighted BCE:** Simple alternative, add `pos_weight` to BCE component for class imbalance
 
 **Loss Function Checklist:**
+
+**How to Do It:** Start with combined BCE + Dice Loss (0.5:0.5 weight) as default. Monitor both loss components separately during training to understand their contributions. If class imbalance is severe (fire pixels <1%), add pos_weight to BCE component or switch to Focal Loss. If recall is too low, try Tversky Loss with higher β parameter to focus on recall. If precision is too low, use Tversky Loss with higher α to focus on precision. Document final loss function, weights, and rationale in experiment tracking.
 
 - [ ] Implement combined BCE + Dice Loss (default)
 - [ ] Monitor both loss components separately
