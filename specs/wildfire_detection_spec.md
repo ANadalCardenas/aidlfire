@@ -362,15 +362,44 @@ Build a deep learning system that detects active wildfires and burned areas from
 
 #### 2.3.2 Normalization Strategy
 
+Normalization scales raw pixel values to a consistent range (typically 0-1) so neural networks can process them efficiently. Sentinel-2 stores reflectance as integers (0-10,000, where 10,000 = 100% reflectance), but models work better with smaller, standardized values.
+
+**Why Normalize?**
+
+- **Numerical stability:** Large values can cause overflow/underflow during training
+- **Faster convergence:** Smaller values help gradients and training stability
+- **Consistent scale:** Different bands have different value ranges
+- **Model compatibility:** Pretrained encoders expect specific input ranges
+
+**Normalization Methods:**
+
 | Method | Description | When to Use |
 |--------|-------------|-------------|
 | **Reflectance scaling** | Divide by 10,000 | **Standard for Sentinel-2 (recommended)** |
 | Min-max per band | Scale to [0,1] using dataset statistics | Alternative |
 | Z-score standardization | (x - mean) / std per band | If using pretrained ImageNet encoder (test if needed) |
 
+**Reflectance Scaling (Recommended):**
+
+- **What it does:** Divides pixel values by 10,000 (e.g., 8,500 → 0.85)
+- **Result:** Values in [0, 1] range, preserving physical meaning (0.85 = 85% reflectance)
+- **Why recommended:** Standard for Sentinel-2, simple, maintains physical interpretation
+- **Example:** A pixel with value 8,500 (85% reflectance) becomes 0.85 after normalization
+
 **Recommendation:** Use reflectance scaling (divide by 10,000) as the default. This is the standard approach for Sentinel-2 data and maintains physical meaning of reflectance values. If using pretrained ImageNet encoders, test whether additional normalization is needed, but start with reflectance scaling.
 
 #### 2.3.3 Patch Extraction
+
+Patch extraction divides large satellite images into smaller, fixed-size squares (patches) that the model can process. Full Sentinel-2 scenes are too large (e.g., 10,980×10,980 pixels) for GPU memory, so we break them into manageable pieces.
+
+**Why Extract Patches?**
+
+- **Memory limits:** GPUs cannot fit entire scenes in memory
+- **Training efficiency:** Smaller inputs train faster and more stably
+- **Standardization:** All patches are the same size (256×256) for consistent processing
+- **More training examples:** One large image becomes many patches, increasing dataset size
+
+**Patch Extraction Parameters:**
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
@@ -378,6 +407,26 @@ Build a deep learning system that detects active wildfires and burned areas from
 | Stride (training) | 128 pixels | Overlapping for augmentation |
 | Stride (inference) | 256 pixels | Non-overlapping with edge blending |
 | Cloud filtering | Discard patches with >50% cloud | Use SCL band or cloud mask |
+
+**Parameter Details:**
+
+**Patch Size (256×256 pixels):**
+- Each patch is 256 pixels wide × 256 pixels tall
+- At 10m resolution, this equals 2.56 km × 2.56 km
+- Standard size in deep learning (powers of 2), balances detail and memory
+
+**Stride (Training: 128 pixels):**
+- Patches overlap by 50% (256 - 128 = 128 pixels overlap)
+- Creates more training examples and reduces edge effects
+- Example: Patch 1 covers [0:256], Patch 2 covers [128:384] (overlaps by 128 pixels)
+
+**Stride (Inference: 256 pixels):**
+- No overlap between patches (faster inference, fewer patches to process)
+- Edge blending used when reconstructing full image to avoid seams
+
+**Cloud Filtering:**
+- Discard patches with >50% cloud cover (use Sentinel-2 SCL band or cloud masks)
+- Cloud-covered patches are not useful for fire detection
 
 **Note:** All datasets will be resized/cropped to 256×256 patches for consistency. If datasets have different native patch sizes, document the resizing strategy.
 
