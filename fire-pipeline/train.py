@@ -4,7 +4,8 @@ Training Script for Fire Detection/Segmentation Model.
 
 Single model that performs both:
 1. Pixel-wise fire segmentation (with severity levels)
-2. Binary fire detection (derived from segmentation)
+2. Binary fire detection (derived from segmentation) + 
+YOLOv8-Seg baseline (RGB-only) using an exported version (train/val splits).
 
 Usage:
     # Basic training with DEL mask (binary fire/no-fire)
@@ -18,6 +19,12 @@ Usage:
 
     # Resume from checkpoint
     uv run python train.py --patches-dir ./patches --resume checkpoints/best_model.pt
+
+Outputs:
+    - SMP model checkpoints and logs are saved under:
+        <output-dir>/encoder_<encoder>/
+    - If enabled/used, YOLO baseline artifacts are saved under:
+        <output-dir>/yolo_seg/
 """
 
 import argparse
@@ -38,6 +45,7 @@ from dataset import (
 from model import FireSegmentationModel, CombinedLoss, ENCODER_OPTIONS
 from metrics import CombinedMetrics
 from constants import get_device, get_class_names
+from yolo_runner import train_yolo_seg, YoloCfg
 
 from ray import tune
 
@@ -552,6 +560,13 @@ def main():
         help="Segmentation architecture",
     )
 
+    # YOLO baseline arguments
+    parser.add_argument(
+        "--include-yolo",
+        action="store_true",
+        help="Also train YOLOv8-Seg RGB baseline after main training",
+    )
+
     # Training arguments
     parser.add_argument("--batch-size", type=int, default=16, help="Batch size")
     parser.add_argument("--epochs", type=int, default=50, help="Number of epochs")
@@ -700,6 +715,9 @@ def main():
     wandb_project = args.project if args.wandb else None
     results = {}
 
+    # Runing bag of models
+    # SMP models
+
     for encoder in encoders_to_train:
         encoder_output_dir = args.output_dir / f"encoder_{encoder}"
 
@@ -737,6 +755,30 @@ def main():
         )
 
         results[encoder] = best_metric
+
+    # YOLOv8-Seg RGB BASELINE
+    if args.include_yolo:
+        from yolo_runner import train_yolo_seg, YoloCfg
+
+        print("\n" + "#" * 80)
+        print("TRAINING YOLOv8-SEG RGB BASELINE")
+        print("#" * 80 + "\n")
+
+        yolo_metrics = train_yolo_seg(
+            patches_dir=args.patches_dir,
+            output_dir=args.output_dir / "yolo_seg",
+            num_classes=args.num_classes,
+            cfg=YoloCfg(
+                epochs=args.epochs,
+                batch=args.batch_size,
+                device=args.yolo_device,
+                rgb_channels=(0, 1, 2),  # update if needed
+            ),
+            num_workers=args.num_workers,
+        )
+
+        print("YOLO validation metrics:", yolo_metrics.get("val_results"))
+
 
 if __name__ == "__main__":
     main()
