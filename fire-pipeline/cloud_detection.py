@@ -106,28 +106,38 @@ def get_cloud_fraction_s2cloudless(
 
     Args:
         image: (H, W, C) float reflectance in [0, 1]. Expects 12 bands in S2 order
-            (B01..B12), or at least 12 channels. Uses 10-band subset required by
-            s2cloudless: B01, B02, B04, B05, B08, B8A, B09, B10, B11, B12.
+            (B01..B12). We build 11 bands for s2cloudless (all_bands=False) by using
+            indices 0,1,3,4,7,8,9,10,11 and duplicating 11 (B12) for the missing 13th band.
         band_order: 's2l2a' or 's2l1c'
 
     Returns:
-        Cloud fraction in [0, 1], or None if s2cloudless is not installed.
+        Cloud fraction in [0, 1], or None if s2cloudless is not installed or
+        band count doesn't match (caller should use rule-based fallback).
     """
     try:
         from s2cloudless import S2PixelCloudDetector
     except ImportError:
         return None
 
-    # S2PixelCloudDetector expects (N, H, W, 10) with bands B01, B02, B04, B05, B08, B8A, B09, B10, B11, B12
-    # Sen2Fire (H, W, 12): indices 0..11 = B1..B12 → use [0,1,3,4,7,8,9,10,11] = 10 bands
+    # s2cloudless all_bands=False expects 11 bands (MODEL_BAND_IDS: indices 0,1,3,4,7,8,9,10,11,12 from 13-band L1C).
+    # Sen2Fire has 12 bands (0-11 = B01..B12). We don't have index 12, so we supply 11 bands by
+    # using indices [0,1,3,4,7,8,9,10,11] and duplicating 11 (B12) as the 11th channel so the detector gets 11 bands.
     if image.shape[-1] < 12:
         return None
-    band_indices_10 = [0, 1, 3, 4, 7, 8, 9, 10, 11]
-    bands_10 = np.clip(image[:, :, band_indices_10].astype(np.float32), 0, 1)
-    detector = S2PixelCloudDetector(threshold=0.4, average_over=4, dilation_size=2)
-    if bands_10.ndim == 3:
-        cloud_probs = detector.get_cloud_probability_maps(np.expand_dims(bands_10, 0))
-        return float(np.mean(cloud_probs[0]))
+    band_indices_11 = [0, 1, 3, 4, 7, 8, 9, 10, 11, 11]  # 11 channels; last is B12 duplicated
+    bands = np.clip(image[:, :, band_indices_11].astype(np.float32), 0, 1)
+    if bands.shape[-1] != 11:
+        return None
+    try:
+        detector = S2PixelCloudDetector(
+            threshold=0.4, average_over=4, dilation_size=2, all_bands=False
+        )
+        if bands.ndim == 3:
+            cloud_probs = detector.get_cloud_probability_maps(np.expand_dims(bands, 0))
+            return float(np.mean(cloud_probs[0]))
+    except ValueError:
+        # Band count mismatch; fall back to rule-based
+        return None
     return None
 
 
