@@ -32,12 +32,13 @@ from tqdm import tqdm
 from dataset import (
     WildfireDataModule,
     compute_class_weights,
+    get_patch_num_channels,
     get_training_augmentation,
     get_strong_augmentation,
 )
 from model import FireSegmentationModel, FireDualHeadModel, CombinedLoss
 from metrics import CombinedMetrics
-from constants import get_device, get_device_name, get_class_names, NUM_INPUT_CHANNELS
+from constants import get_device, get_device_name, get_class_names
 
 
 def setup_wandb(config: dict, project: str, run_name: str | None = None, wandb_dir: Path | None = None):
@@ -307,6 +308,10 @@ def train(
     print(f"  Architecture: {architecture}")
     print(f"{'='*60}\n")
 
+    # Infer input channels from patch data (7 or 8) so model matches your patches
+    in_channels = get_patch_num_channels(patches_dir)
+    print(f"  Input channels (from patches): {in_channels}\n")
+
     # Class names for metrics (use shared constants)
     class_names = list(get_class_names(2 if use_dual_head else num_classes))
 
@@ -314,7 +319,7 @@ def train(
     config = {
         "patches_dir": str(patches_dir),
         "num_classes": num_classes,
-        "in_channels": NUM_INPUT_CHANNELS,
+        "in_channels": in_channels,
         "dual_head": use_dual_head,
         "encoder_name": encoder_name,
         "architecture": architecture,
@@ -373,7 +378,7 @@ def train(
     if use_dual_head:
         model = FireDualHeadModel(
             encoder_name=encoder_name,
-            in_channels=NUM_INPUT_CHANNELS,
+            in_channels=in_channels,
             encoder_weights="imagenet",
             architecture=architecture,
         )
@@ -382,7 +387,7 @@ def train(
         model = FireSegmentationModel(
             encoder_name=encoder_name,
             num_classes=num_classes,
-            in_channels=NUM_INPUT_CHANNELS,
+            in_channels=in_channels,
             encoder_weights="imagenet",
             architecture=architecture,
         )

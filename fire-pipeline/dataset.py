@@ -530,6 +530,36 @@ def compute_dataset_statistics(patches_dir: Path | str, batch_size: int = 100) -
     }
 
 
+def get_patch_num_channels(patches_dir: Path | str, split: str = "train") -> int:
+    """
+    Infer number of input channels from patch files (7 or 8).
+
+    Loads one *_image.npy from patches_dir/split and returns shape[-1].
+    Use this so the model matches your patch format (with or without NDVI).
+
+    Args:
+        patches_dir: Root directory containing train/val/test subdirs
+        split: Subdir name (train, val, or test)
+
+    Returns:
+        Number of channels (7 or 8)
+
+    Raises:
+        ValueError: If no patch found or shape is invalid
+    """
+    patches_dir = Path(patches_dir)
+    split_dir = patches_dir / split
+    if not split_dir.exists():
+        raise ValueError(f"Split directory not found: {split_dir}")
+    image_files = list(split_dir.glob("*_image.npy"))
+    if not image_files:
+        raise ValueError(f"No *_image.npy files in {split_dir}")
+    img = np.load(image_files[0])
+    if img.ndim != 3:
+        raise ValueError(f"Expected 3D patch (H, W, C), got shape {img.shape}")
+    return int(img.shape[-1])
+
+
 def compute_class_weights(patches_dir: Path | str, num_classes: int = 2) -> np.ndarray:
     """
     Compute class weights for loss function based on pixel frequency.
