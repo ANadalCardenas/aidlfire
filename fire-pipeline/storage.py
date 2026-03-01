@@ -216,11 +216,20 @@ class StorageManager:
         # Save inference result
         result_filename = f"{analysis_id}_result.npz"
         result_path = self.results_dir / result_filename
-        np.savez_compressed(
-            result_path,
-            segmentation=inference_result.segmentation,
-            probabilities=inference_result.probabilities,
-        )
+        save_dict = {
+            "segmentation": inference_result.segmentation,
+            "probabilities": inference_result.probabilities,
+        }
+        if getattr(inference_result, "dual_head", False):
+            if inference_result.binary_segmentation is not None:
+                save_dict["binary_segmentation"] = inference_result.binary_segmentation
+            if inference_result.severity_segmentation is not None:
+                save_dict["severity_segmentation"] = inference_result.severity_segmentation
+            if inference_result.binary_probabilities is not None:
+                save_dict["binary_probabilities"] = inference_result.binary_probabilities
+            if inference_result.severity_probabilities is not None:
+                save_dict["severity_probabilities"] = inference_result.severity_probabilities
+        np.savez_compressed(result_path, **save_dict)
 
         # Save visualization if provided
         visualization_path = None
@@ -230,6 +239,10 @@ class StorageManager:
             vis_filename = f"{analysis_id}_vis.png"
             visualization_path = self.visualizations_dir / vis_filename
             Image.fromarray(visualization).save(visualization_path)
+
+        metadata = metadata or {}
+        if getattr(inference_result, "dual_head", False):
+            metadata["dual_head"] = True
 
         # Save to database
         center_lon, center_lat = satellite_image.center
@@ -303,6 +316,14 @@ class StorageManager:
                 data = np.load(result_path)
                 result["segmentation"] = data["segmentation"]
                 result["probabilities"] = data["probabilities"]
+                if "binary_segmentation" in data:
+                    result["binary_segmentation"] = data["binary_segmentation"]
+                if "severity_segmentation" in data:
+                    result["severity_segmentation"] = data["severity_segmentation"]
+                if "binary_probabilities" in data:
+                    result["binary_probabilities"] = data["binary_probabilities"]
+                if "severity_probabilities" in data:
+                    result["severity_probabilities"] = data["severity_probabilities"]
 
         # Load visualization
         if record.visualization_path:

@@ -30,6 +30,10 @@ BAND_INDICES = (1, 2, 3, 7, 8, 10, 11)
 # Band names in order of our 7-channel format
 BAND_NAMES = ("B02", "B03", "B04", "B08", "B8A", "B11", "B12")
 
+# Indices of Red and NIR within the 7-channel array (for NDVI: (NIR - Red) / (NIR + Red))
+RED_INDEX_7 = 2   # B04
+NIR_INDEX_7 = 3   # B08
+
 # Human-readable band descriptions
 BAND_DESCRIPTIONS = (
     "B02 (Blue, 490nm)",
@@ -39,10 +43,15 @@ BAND_DESCRIPTIONS = (
     "B8A (NIR narrow, 865nm)",
     "B11 (SWIR1, 1610nm)",
     "B12 (SWIR2, 2190nm)",
+    "NDVI (vegetation index)",
 )
 
-# Number of input channels for the model
-NUM_INPUT_CHANNELS = 7
+# Number of input channels for the model (7 bands + NDVI when vegetation is enabled)
+NUM_INPUT_CHANNELS = 8
+NUM_SPECTRAL_BANDS = 7
+
+# Names for all model input channels (7 bands + NDVI)
+INPUT_CHANNEL_NAMES = (*BAND_NAMES, "NDVI")
 
 
 # =============================================================================

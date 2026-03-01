@@ -210,6 +210,55 @@ class TestStorageManager:
         assert result is False
         assert outside_file.exists()  # File should still exist
 
+    def test_save_and_load_dual_head_analysis(
+        self, storage, mock_satellite_image
+    ):
+        """Test saving and loading an analysis with dual-head (binary + severity)."""
+        from inference import InferenceResult
+
+        h, w = 64, 64
+        segmentation = np.random.randint(0, 2, (h, w), dtype=np.uint8)
+        probabilities = np.random.rand(h, w, 2).astype(np.float32)
+        binary_seg = np.random.randint(0, 2, (h, w), dtype=np.uint8)
+        severity_seg = np.random.randint(0, 5, (h, w), dtype=np.uint8)
+        binary_probs = np.random.rand(h, w, 2).astype(np.float32)
+        severity_probs = np.random.rand(h, w, 5).astype(np.float32)
+
+        result = InferenceResult(
+            segmentation=segmentation,
+            probabilities=probabilities,
+            has_fire=True,
+            fire_confidence=0.8,
+            fire_fraction=0.1,
+            severity_counts={"background": 3000, "fire": 1000},
+            num_classes=2,
+            image_shape=(h, w),
+            dual_head=True,
+            binary_segmentation=binary_seg,
+            severity_segmentation=severity_seg,
+            binary_probabilities=binary_probs,
+            severity_probabilities=severity_probs,
+        )
+
+        # Resize mock image to match
+        mock_satellite_image.data = np.random.rand(h, w, 7).astype(np.float32)
+        vis = np.random.randint(0, 255, (h, w, 3), dtype=np.uint8)
+
+        analysis_id = storage.save_analysis(
+            satellite_image=mock_satellite_image,
+            inference_result=result,
+            visualization=vis,
+        )
+
+        loaded = storage.load_analysis(analysis_id)
+        assert loaded is not None
+        assert "binary_segmentation" in loaded
+        assert "severity_segmentation" in loaded
+        np.testing.assert_array_equal(loaded["binary_segmentation"], binary_seg)
+        np.testing.assert_array_equal(loaded["severity_segmentation"], severity_seg)
+        assert loaded["record"].metadata is not None
+        assert loaded["record"].metadata.get("dual_head") is True
+
 
 class TestAnalysisRecord:
     """Tests for AnalysisRecord dataclass."""

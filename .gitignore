@@ -38,6 +38,8 @@ env/
 wildfires-cems/
 data/
 patches/
+data-sen2fire/
+Sen2Fire.zip
 
 # Generated patches
 patches/

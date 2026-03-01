@@ -42,6 +42,7 @@ from inference import (
     FireInferencePipeline,
     InferenceResult,
     create_visualization,
+    create_visualization_from_segmentation,
     create_fire_mask_visualization,
 )
 
@@ -620,8 +621,14 @@ def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
     segmentation = analysis.get("segmentation")
     probabilities = analysis.get("probabilities")
     visualization = analysis.get("visualization")
+    binary_segmentation = analysis.get("binary_segmentation")
+    severity_segmentation = analysis.get("severity_segmentation")
+    binary_probabilities = analysis.get("binary_probabilities")
+    severity_probabilities = analysis.get("severity_probabilities")
 
-    if not all([record, image_arr is not None, segmentation is not None, visualization is not None]):
+    if not all([record, image_arr is not None, segmentation is not None]):
+        return None
+    if visualization is None and not (record.metadata and record.metadata.get("dual_head")):
         return None
 
     # Build SatelliteImage for display (crs not stored, use placeholder)
@@ -637,6 +644,11 @@ def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
 
     # Compute severity_counts from segmentation
     num_classes = record.num_classes
+    dual_head = bool(
+        record.metadata and record.metadata.get("dual_head")
+        and binary_segmentation is not None
+        and severity_segmentation is not None
+    )
     try:
         class_names = get_class_names(num_classes)
     except ValueError:
@@ -644,9 +656,10 @@ def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
     severity_counts = {name: int((segmentation == i).sum()) for i, name in enumerate(class_names)}
 
     # Build InferenceResult (probabilities may be missing in older saves)
-    if probabilities is None or probabilities.shape[2] != num_classes:
-        probs = np.zeros((*segmentation.shape, num_classes), dtype=np.float32)
-        for c in range(num_classes):
+    if probabilities is None or probabilities.shape[2] != (2 if dual_head else num_classes):
+        n = 2 if dual_head else num_classes
+        probs = np.zeros((*segmentation.shape, n), dtype=np.float32)
+        for c in range(n):
             probs[:, :, c] = (segmentation == c).astype(np.float32)
         probabilities = probs
 
@@ -657,9 +670,20 @@ def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
         fire_confidence=record.fire_confidence,
         fire_fraction=record.fire_fraction,
         severity_counts=severity_counts,
-        num_classes=num_classes,
+        num_classes=2 if dual_head else num_classes,
         image_shape=image_arr.shape[:2],
+        dual_head=dual_head,
+        binary_segmentation=binary_segmentation if dual_head else None,
+        severity_segmentation=severity_segmentation if dual_head else None,
+        binary_probabilities=binary_probabilities if dual_head else None,
+        severity_probabilities=severity_probabilities if dual_head else None,
     )
+
+    # If no saved visualization but dual_head with maps, we'll render from result in render_analysis_results
+    if visualization is None and dual_head:
+        visualization = create_visualization_from_segmentation(
+            image_arr, result.binary_segmentation if result.binary_segmentation is not None else segmentation, 2, alpha=0.5
+        )
 
     return {
         "image": image,
@@ -726,7 +750,36 @@ def render_analysis_results(data: dict, from_history: bool = False) -> None:
     # Synced zoom/pan viewer - full width in main area
     rgb_preview = create_rgb_preview(image)
     st.caption("Scroll to zoom, drag to pan. Both images stay in sync.")
-    render_synced_images(rgb_preview, visualization, "Original", "Fire detection")
+
+    # Dual-head: optional layers (binary fire + severity)
+    if getattr(result, "dual_head", False) and result.binary_segmentation is not None and result.severity_segmentation is not None:
+        st.caption("**Dual-head model:** toggle layers below to compare binary fire and severity maps.")
+        show_binary = st.checkbox("Show binary fire map", value=True, key="show_binary_layer")
+        show_severity = st.checkbox("Show severity map", value=True, key="show_severity_layer")
+        if show_binary and show_severity:
+            vis_binary = create_visualization_from_segmentation(
+                image.data, result.binary_segmentation, 2, alpha=0.5
+            )
+            vis_severity = create_visualization_from_segmentation(
+                image.data, result.severity_segmentation, 5, alpha=0.5
+            )
+            render_synced_images(rgb_preview, vis_binary, "Original", "Binary fire")
+            st.markdown("---")
+            render_synced_images(rgb_preview, vis_severity, "Original", "Severity")
+        elif show_binary:
+            vis_binary = create_visualization_from_segmentation(
+                image.data, result.binary_segmentation, 2, alpha=0.5
+            )
+            render_synced_images(rgb_preview, vis_binary, "Original", "Binary fire")
+        elif show_severity:
+            vis_severity = create_visualization_from_segmentation(
+                image.data, result.severity_segmentation, 5, alpha=0.5
+            )
+            render_synced_images(rgb_preview, vis_severity, "Original", "Severity")
+        else:
+            st.info("Enable at least one layer (binary fire or severity) to see the map.")
+    else:
+        render_synced_images(rgb_preview, visualization, "Original", "Fire detection")
 
     # When fire detected, show high-contrast fire mask so sparse detections are visible
     if result.has_fire:

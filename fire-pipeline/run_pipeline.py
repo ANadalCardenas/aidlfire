@@ -96,6 +96,11 @@ def main():
         action="store_true",
         help="Regenerate all patches, even if they already exist (default: resume)",
     )
+    parser.add_argument(
+        "--no-ndvi",
+        action="store_true",
+        help="Disable NDVI as 8th channel (output 7 channels only; default: include NDVI)",
+    )
 
     args = parser.parse_args()
 
@@ -106,6 +111,7 @@ def main():
     print(f"Output directory: {args.output_dir.absolute()}")
     print(f"Mask type: {args.mask_type}")
     print(f"Max cloud cover: {args.max_cloud_cover:.0%}")
+    print(f"Channels: {'7 (no NDVI)' if args.no_ndvi else '8 (7 bands + NDVI)'}")
     print()
 
     # Check dataset exists
@@ -138,7 +144,10 @@ def main():
 
     # Generate patches
     print("\nStep 2: Generating patches...")
-    config = PatchConfig(max_cloud_cover=args.max_cloud_cover)
+    config = PatchConfig(
+        max_cloud_cover=args.max_cloud_cover,
+        include_ndvi=not args.no_ndvi,
+    )
     generator = PatchGenerator(config)
 
     skip_existing = not args.force

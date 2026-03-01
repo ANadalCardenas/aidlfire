@@ -8,6 +8,7 @@ from inference import (
     FireInferencePipeline,
     InferenceResult,
     create_visualization,
+    create_visualization_from_segmentation,
 )
 
 
@@ -85,6 +86,7 @@ class TestFireInferencePipelinePreprocessing:
         pipeline.patch_size = 256
         pipeline.stride = 256
         pipeline.BAND_INDICES = (1, 2, 3, 7, 8, 10, 11)
+        pipeline.config = {"in_channels": 7}
         return pipeline
 
     def test_preprocess_uint16(self, pipeline):
@@ -117,7 +119,7 @@ class TestFireInferencePipelinePreprocessing:
         """Test that wrong number of channels raises error."""
         image = np.random.rand(100, 100, 5).astype(np.float32)
 
-        with pytest.raises(ValueError, match="Expected 7 or 12 channels"):
+        with pytest.raises(ValueError, match="Expected 7, 8, or 12 channels"):
             pipeline.preprocess_image(image, select_bands=True)
 
 
@@ -239,4 +241,39 @@ class TestVisualization:
         vis = create_visualization(image, result, alpha=0.5)
 
         assert vis.shape == (64, 64, 3)
+        assert vis.dtype == np.uint8
+
+    def test_inference_result_dual_head(self):
+        """InferenceResult with dual_head uses binary_segmentation for get_fire_mask."""
+        binary_seg = np.array([[0, 1, 0], [1, 1, 0]], dtype=np.uint8)
+        severity_seg = np.array([[0, 1, 2], [2, 3, 0]], dtype=np.uint8)
+        result = InferenceResult(
+            segmentation=binary_seg,
+            probabilities=np.random.rand(2, 3, 2).astype(np.float32),
+            has_fire=True,
+            fire_confidence=0.9,
+            fire_fraction=0.5,
+            severity_counts={},
+            num_classes=2,
+            image_shape=(2, 3),
+            dual_head=True,
+            binary_segmentation=binary_seg,
+            severity_segmentation=severity_seg,
+            binary_probabilities=np.random.rand(2, 3, 2).astype(np.float32),
+            severity_probabilities=np.random.rand(2, 3, 5).astype(np.float32),
+        )
+        fire_mask = result.get_fire_mask()
+        np.testing.assert_array_equal(fire_mask, binary_seg)
+        severity_map = result.get_severity_map()
+        np.testing.assert_array_equal(severity_map, severity_seg)
+
+    def test_create_visualization_from_segmentation(self):
+        """create_visualization_from_segmentation returns RGB overlay."""
+        image = np.random.rand(32, 32, 7).astype(np.float32)
+        segmentation = np.zeros((32, 32), dtype=np.uint8)
+        segmentation[10:20, 10:20] = 1
+        vis = create_visualization_from_segmentation(
+            image, segmentation, num_classes=2, alpha=0.5
+        )
+        assert vis.shape == (32, 32, 3)
         assert vis.dtype == np.uint8

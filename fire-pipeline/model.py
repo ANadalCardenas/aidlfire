@@ -1,14 +1,15 @@
 """
-Fire Detection Model - Single model for segmentation and classification.
+Fire Detection Model - Single and dual-head segmentation models.
 
-This module provides a U-Net based segmentation model that:
-1. Performs pixel-wise fire/severity segmentation
-2. Derives binary fire detection from segmentation output
+This module provides:
+1. FireSegmentationModel: single head (2 or 5 classes)
+2. FireDualHeadModel: binary fire head (2 classes) + severity head (5 classes)
+   - Train on CEMS with both heads; freeze severity head when fine-tuning on Sen2Fire
 
 Architecture:
-    - Encoder: Pretrained ResNet/EfficientNet (adapts to 7 input channels)
+    - Encoder: Pretrained ResNet/EfficientNet (adapts to 7/8 input channels)
     - Decoder: U-Net style decoder with skip connections
-    - Output: (B, num_classes, H, W) segmentation logits
+    - Output: (B, num_classes, H, W) or (binary_logits, severity_logits) for dual-head
 """
 
 from typing import Literal
@@ -228,6 +229,102 @@ class FireSegmentationModel(nn.Module):
         seg_pred = self.predict_segmentation(x)
         fire_pixels = (seg_pred > 0).float()
         return fire_pixels.mean(dim=(1, 2))
+
+
+def _get_decoder_out_channels(segmentation_head: nn.Module) -> int:
+    """Get the number of channels feeding into the segmentation head (decoder output)."""
+    if hasattr(segmentation_head, "conv"):
+        return segmentation_head.conv.in_channels
+    if isinstance(segmentation_head, nn.Conv2d):
+        return segmentation_head.in_channels
+    if isinstance(segmentation_head, nn.Sequential):
+        for m in segmentation_head:
+            if isinstance(m, nn.Conv2d):
+                return m.in_channels
+    raise ValueError("Cannot infer decoder output channels from segmentation head")
+
+
+class FireDualHeadModel(nn.Module):
+    """
+    Fire model with two heads: binary fire (2 classes) and severity (5 classes).
+
+    - Binary head: fire vs no-fire (for DEL / Sen2Fire).
+    - Severity head: 5 GRA levels (for CEMS only); can be frozen when fine-tuning on Sen2Fire.
+
+    Use train_dual_head on CEMS (GRA patches, derive binary from mask>0) then
+    fine-tune on Sen2Fire with freeze_severity_head() and only binary loss.
+    """
+
+    def __init__(
+        self,
+        encoder_name: str = "resnet34",
+        in_channels: int = 8,
+        encoder_weights: str | None = "imagenet",
+        architecture: Literal["unet", "unetplusplus", "deeplabv3plus"] = "unet",
+    ):
+        super().__init__()
+        self.in_channels = in_channels
+        self.binary_classes = 2
+        self.severity_classes = 5
+
+        base = create_segmentation_model(
+            encoder_name=encoder_name,
+            num_classes=2,
+            in_channels=in_channels,
+            encoder_weights=encoder_weights,
+            architecture=architecture,
+        )
+        self.encoder = base.encoder
+        self.decoder = base.decoder
+        self.binary_head = base.segmentation_head
+
+        decoder_out = _get_decoder_out_channels(self.binary_head)
+        self.severity_head = nn.Conv2d(decoder_out, 5, kernel_size=1)
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        """
+        Forward pass.
+
+        Returns:
+            binary_logits: (B, 2, H, W)
+            severity_logits: (B, 5, H, W)
+        """
+        features = self.encoder(x)
+        decoder_out = self.decoder(features)
+        binary_logits = self.binary_head(decoder_out)
+        severity_logits = self.severity_head(decoder_out)
+        return binary_logits, severity_logits
+
+    def freeze_severity_head(self) -> None:
+        """Freeze the severity head (e.g. when fine-tuning on Sen2Fire with binary only)."""
+        for p in self.severity_head.parameters():
+            p.requires_grad = False
+
+    def unfreeze_severity_head(self) -> None:
+        """Unfreeze the severity head."""
+        for p in self.severity_head.parameters():
+            p.requires_grad = True
+
+    def predict_binary(self, x: torch.Tensor) -> torch.Tensor:
+        """Binary segmentation (B, H, W) with values 0 or 1."""
+        binary_logits, _ = self.forward(x)
+        return binary_logits.argmax(dim=1)
+
+    def predict_severity(self, x: torch.Tensor) -> torch.Tensor:
+        """Severity segmentation (B, H, W) with values 0-4."""
+        _, severity_logits = self.forward(x)
+        return severity_logits.argmax(dim=1)
+
+    def predict_fire_detection(self, x: torch.Tensor) -> torch.Tensor:
+        """Patch-level fire detection (B,) boolean."""
+        binary = self.predict_binary(x)
+        return (binary > 0).any(dim=(1, 2))
+
+    def predict_fire_confidence(self, x: torch.Tensor) -> torch.Tensor:
+        """Max fire probability over pixels (B,) in [0, 1]."""
+        binary_logits, _ = self.forward(x)
+        probs = torch.softmax(binary_logits, dim=1)
+        return probs[:, 1, :, :].amax(dim=(1, 2))
 
 
 class DiceLoss(nn.Module):
