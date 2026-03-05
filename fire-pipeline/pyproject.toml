@@ -21,6 +21,7 @@ train = [
     "segmentation-models-pytorch>=0.3.0",
     "torchmetrics>=1.0.0",
     "wandb>=0.15.0",
+    "s2cloudless>=1.0.0",
 ]
 app = [
     "streamlit>=1.30.0",
@@ -39,6 +40,7 @@ all = [
     "segmentation-models-pytorch>=0.3.0",
     "torchmetrics>=1.0.0",
     "wandb>=0.15.0",
+    "s2cloudless>=1.0.0",
     "huggingface_hub>=0.20.0",
     "streamlit>=1.30.0",
     "folium>=0.15.0",

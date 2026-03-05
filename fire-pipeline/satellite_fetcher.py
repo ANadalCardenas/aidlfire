@@ -198,6 +198,8 @@ class SatelliteFetcher:
 
         # Collect band data
         band_data = []
+        actual_read_bbox = None  # Clipped bbox in source CRS (set when bbox used)
+        source_crs = None
 
         for band_name in self.BANDS:
             asset = item.assets.get(band_name)
@@ -216,7 +218,23 @@ class SatelliteFetcher:
                             )
                         else:
                             read_bbox = bbox
-                        # Read only the requested region
+                        # Clip to scene bounds so we never read outside the raster
+                        # (otherwise rasterio fills out-of-bounds with 0 → black half-image)
+                        src_left, src_bottom, src_right, src_top = src.bounds
+                        r_w, r_s, r_e, r_n = read_bbox
+                        clip_w = max(r_w, src_left)
+                        clip_s = max(r_s, src_bottom)
+                        clip_e = min(r_e, src_right)
+                        clip_n = min(r_n, src_top)
+                        if clip_w >= clip_e or clip_s >= clip_n:
+                            raise ValueError(
+                                f"Bbox does not intersect scene {scene['id']}. "
+                                "Try a smaller region or different dates."
+                            )
+                        read_bbox = (clip_w, clip_s, clip_e, clip_n)
+                        actual_read_bbox = read_bbox
+                        source_crs = src.crs
+                        # Read only the requested region (now within scene)
                         window = from_bounds(*read_bbox, src.transform)
                         data = src.read(1, window=window)
                         transform = src.window_transform(window)
@@ -258,9 +276,16 @@ class SatelliteFetcher:
         image_data = image_data.astype(np.float32) / 10000.0
         image_data = np.clip(image_data, 0.0, 1.0)
 
-        # Determine actual bounds
+        # Determine actual bounds (clipped to scene if bbox only partially overlapped)
         if bbox:
-            bounds = bbox
+            if actual_read_bbox is not None and source_crs and str(source_crs) != "EPSG:4326":
+                bounds = tuple(
+                    transform_bounds(
+                        CRS.from_string(str(source_crs)), CRS.from_epsg(4326), *actual_read_bbox
+                    )
+                )
+            else:
+                bounds = actual_read_bbox if actual_read_bbox is not None else bbox
         else:
             bounds = tuple(scene["bbox"])
 

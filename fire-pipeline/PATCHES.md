@@ -8,7 +8,8 @@ This document explains what patches are, how they're generated, what data they c
 
 - [What Are Patches?](#what-are-patches)
 - [Why Numpy Instead of Images?](#why-numpy-instead-of-images)
-- [The 7 Channels Explained](#the-7-channels-explained)
+- [The 7 spectral bands](#the-7-spectral-bands)
+- [The 8th channel (NDVI)](#the-8th-channel-ndvi)
 - [Patch File Structure](#patch-file-structure)
 - [The metadata.csv File](#the-metadatacsv-file)
 - [Loading Patches for Training](#loading-patches-for-training)
@@ -67,7 +68,7 @@ PNG/JPEG images:              Numpy arrays:
 
 ---
 
-## The 7 Channels Explained
+## The 7 spectral bands
 
 We select 7 useful bands from the original 12 Sentinel-2 bands:
 
@@ -117,12 +118,31 @@ import numpy as np
 
 image = np.load("patch_image.npy")
 
-print("Shape:", image.shape)  # (256, 256, 7)
+print("Shape:", image.shape)  # (256, 256, 7) or (256, 256, 8)
 
-for i, name in enumerate(["Blue", "Green", "Red", "NIR", "NIR-narrow", "SWIR1", "SWIR2"]):
+channel_names = ["Blue", "Green", "Red", "NIR", "NIR-narrow", "SWIR1", "SWIR2"]
+if image.shape[2] == 8:
+    channel_names.append("NDVI")
+for i, name in enumerate(channel_names):
     layer = image[:, :, i]
     print(f"Layer {i} ({name}): min={layer.min():.3f}, max={layer.max():.3f}, mean={layer.mean():.3f}")
 ```
+
+---
+
+## The 8th channel (NDVI)
+
+When **NDVI** (Normalized Difference Vegetation Index) is enabled (default), patches have **8 channels**. The 8th channel helps separate burn scars from other dark surfaces (water, shadow, soil).
+
+| Property | Value |
+|----------|--------|
+| **Formula** | NDVI = (NIR − Red) / (NIR + Red + ε) |
+| **Source bands** | Red = channel 2 (B04), NIR = channel 3 (B08) |
+| **Raw range** | [−1, 1] (vegetation high, water/soil low) |
+| **Stored range** | [0, 1] (mapped: `(NDVI + 1) / 2`) |
+
+- **Enable/disable**: Use `include_ndvi=True` (default) or `False` in `PatchConfig`, or `--no-ndvi` in `run_pipeline.py` to output 7 channels only.
+- **Constants**: `constants.NUM_INPUT_CHANNELS` = 8, `RED_INDEX_7` = 2, `NIR_INDEX_7` = 3.
 
 ---
 
@@ -133,7 +153,7 @@ After running the pipeline, you get:
 ```
 patches/
 ├── train/
-│   ├── EMSR230_AOI01_01_r0_c0_image.npy       # (256, 256, 7) float32
+│   ├── EMSR230_AOI01_01_r0_c0_image.npy       # (256, 256, 7) or (256, 256, 8) float32
 │   ├── EMSR230_AOI01_01_r0_c0_mask.npy        # (256, 256) uint8
 │   ├── EMSR230_AOI01_01_r0_c128_image.npy
 │   ├── EMSR230_AOI01_01_r0_c128_mask.npy
@@ -165,7 +185,7 @@ EMSR230_AOI01_01_r128_c256_image.npy
 ```python
 # Image patch
 image = np.load("*_image.npy")
-print(image.shape)  # (256, 256, 7)
+print(image.shape)  # (256, 256, 7) or (256, 256, 8)
 print(image.dtype)  # float32
 print(image.min(), image.max())  # 0.0 to 1.0
 
@@ -271,12 +291,12 @@ test_loader = data_module.test_dataloader()
 patch_files = glob("*_image.npy")
 
 # 2. When you request a sample:
-image = np.load("patch_image.npy")     # (256, 256, 7)
+image = np.load("patch_image.npy")     # (256, 256, 7) or (256, 256, 8)
 mask = np.load("patch_mask.npy")       # (256, 256)
 
 # 3. Convert to PyTorch format
-image = torch.from_numpy(image)        # still (256, 256, 7)
-image = image.permute(2, 0, 1)         # now (7, 256, 256) ← channels first!
+image = torch.from_numpy(image)        # still (256, 256, 7) or (256, 256, 8)
+image = image.permute(2, 0, 1)         # now (7, 256, 256) or (8, 256, 256) ← channels first!
 image = image.float()                  # float32
 
 mask = torch.from_numpy(mask)          # (256, 256)
@@ -305,8 +325,8 @@ patches/train/
                                            ▼
                                     ┌─────────────────────┐
                                     │ Training Loop       │
-                                    │                     │
-                                    │ images: (32,7,256,256)
+                                    │                                                         │
+                                    │ images: (32,7,256,256) or (32,8,256,256)
                                     │ masks:  (32,256,256) │
                                     └─────────────────────┘
 ```
@@ -326,8 +346,8 @@ val_dataset = WildfirePatchDataset("./patches/val")
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 val_loader = DataLoader(val_dataset, batch_size=32, shuffle=False)
 
-# Your model (e.g., U-Net with 7 input channels)
-model = UNet(in_channels=7, out_channels=2)  # 2 classes: fire / no fire
+# Your model (e.g., U-Net with 7 or 8 input channels)
+model = UNet(in_channels=8, out_channels=2)  # 8 with NDVI; 2 classes: fire / no fire
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
@@ -335,7 +355,7 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 for epoch in range(num_epochs):
     model.train()
     for images, masks in train_loader:
-        # images: (batch, 7, 256, 256)
+        # images: (batch, 7 or 8, 256, 256)
         # masks:  (batch, 256, 256)
 
         optimizer.zero_grad()
@@ -458,8 +478,8 @@ from dataset import compute_dataset_statistics
 
 # Compute stats from your data
 stats = compute_dataset_statistics("./patches/train")
-print(f"Mean: {stats['mean']}")  # Shape: (7,)
-print(f"Std:  {stats['std']}")   # Shape: (7,)
+print(f"Mean: {stats['mean']}")  # Shape: (7,) or (8,)
+print(f"Std:  {stats['std']}")   # Shape: (7,) or (8,)
 
 # Create normalizer (applied after augmentation)
 normalize = transforms.Normalize(
@@ -499,8 +519,11 @@ criterion = nn.CrossEntropyLoss(weight=torch.tensor(weights))
 ```bash
 cd fire-pipeline
 
-# Generate patches (default: ./patches output, DEL mask)
+# Generate patches (default: 8 channels = 7 bands + NDVI, DEL mask)
 uv run python run_pipeline.py --skip-extraction
+
+# 7 channels only (no NDVI, e.g. for backward compatibility)
+uv run python run_pipeline.py --skip-extraction --no-ndvi
 
 # Custom output location
 uv run python run_pipeline.py --skip-extraction --output-dir /path/to/patches
@@ -521,6 +544,8 @@ Options:
   --splits LIST           Which splits to process (default: train val test)
   --max-cloud-cover FLOAT Reject patches cloudier than this (default: 0.5)
   --skip-extraction       Don't try to extract tar files
+  --force                 Regenerate all patches (default: skip existing)
+  --no-ndvi               Disable NDVI; output 7 channels only (default: include NDVI)
 ```
 
 ### What the Pipeline Does
@@ -529,14 +554,15 @@ Options:
 ┌─────────────────────────────────────────────────────────────────────────┐
 │  1. Load satellite image (12 bands)                                     │
 │  2. Select 7 useful bands                                               │
-│  3. Load corresponding mask (DEL or GRA)                                │
-│  4. Load cloud mask                                                     │
-│  5. Slide 256×256 window across image                                   │
-│  6. For each window position:                                           │
+│  3. Optionally compute NDVI and append as 8th channel (default: yes)    │
+│  4. Load corresponding mask (DEL or GRA)                               │
+│  5. Load cloud mask                                                     │
+│  6. Slide 256×256 window across image                                   │
+│  7. For each window position:                                           │
 │     - Check cloud cover                                                 │
 │     - If cloud_cover <= 50%: save patch                                 │
 │     - Record metadata (coordinates, stats)                              │
-│  7. Save metadata.csv                                                   │
+│  8. Save metadata.csv                                                   │
 └─────────────────────────────────────────────────────────────────────────┘
 ```
 

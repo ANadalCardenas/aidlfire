@@ -45,10 +45,11 @@ from utils_report import print_run_summary, append_results_csv
 from dataset import (
     WildfireDataModule,
     compute_class_weights,
+    get_patch_num_channels,
     get_training_augmentation,
     get_strong_augmentation,
 )
-from model import FireSegmentationModel, CombinedLoss, ENCODER_OPTIONS
+from model import FireSegmentationModel, FireDualHeadModel, CombinedLoss, ENCODER_OPTIONS
 from scratch_model import ScratchFireModel
 from unet_scratch import UNet
 from metrics import CombinedMetrics
@@ -135,6 +136,9 @@ def train_epoch(
     device: torch.device,
     epoch: int,
     metrics: CombinedMetrics,
+    *,
+    criterion_severity: nn.Module | None = None,
+    dual_head: bool = False,
 ) -> dict:
     """Train for one epoch."""
     model.train()
@@ -150,33 +154,40 @@ def train_epoch(
         images = images.to(device)
         masks = masks.to(device)
 
-        # Forward pass
         optimizer.zero_grad()
-        logits = model(images)
-
-        # Compute loss - CombinedLoss returns (loss, dict), others return just loss
-        result = criterion(logits, masks)
-        if isinstance(result, tuple):
-            loss, components = result
-            for k, v in components.items():
-                loss_components[k] += v
+        if dual_head and isinstance(model, FireDualHeadModel):
+            binary_logits, severity_logits = model(images)
+            mask_binary = (masks > 0).long()
+            result_bin = criterion(binary_logits, mask_binary)
+            loss_bin = result_bin[0] if isinstance(result_bin, tuple) else result_bin
+            result_sev = criterion_severity(severity_logits, masks)
+            loss_sev = result_sev[0] if isinstance(result_sev, tuple) else result_sev
+            loss = loss_bin + loss_sev
+            logits = binary_logits  # metrics on binary for primary
         else:
-            loss = result
+            logits = model(images)
+            result = criterion(logits, masks)
+            if isinstance(result, tuple):
+                loss, components = result
+                for k, v in components.items():
+                    loss_components[k] += v
+            else:
+                loss = result
 
-        # Backward pass
         loss.backward()
         optimizer.step()
 
-        # Update metrics
         with torch.no_grad():
-            metrics.update(logits, masks)
+            if dual_head and isinstance(model, FireDualHeadModel):
+                metrics.update(binary_logits, (masks > 0).long())
+            else:
+                metrics.update(logits, masks)
 
         total_loss += loss.item()
         num_batches += 1
 
         pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-    # Compute epoch metrics
     epoch_metrics = metrics.compute()
     epoch_metrics["loss"] = total_loss / num_batches
     for k, v in loss_components.items():
@@ -193,6 +204,9 @@ def validate_epoch(
     device: torch.device,
     epoch: int,
     metrics: CombinedMetrics,
+    *,
+    criterion_severity: nn.Module | None = None,
+    dual_head: bool = False,
 ) -> dict:
     """Validate for one epoch."""
     model.eval()
@@ -207,22 +221,29 @@ def validate_epoch(
         images = images.to(device)
         masks = masks.to(device)
 
-        logits = model(images)
-
-        # Compute loss - CombinedLoss returns (loss, dict), others return just loss
-        result = criterion(logits, masks)
-        if isinstance(result, tuple):
-            loss, _ = result
+        if dual_head and isinstance(model, FireDualHeadModel):
+            binary_logits, severity_logits = model(images)
+            mask_binary = (masks > 0).long()
+            result_bin = criterion(binary_logits, mask_binary)
+            loss_bin = result_bin[0] if isinstance(result_bin, tuple) else result_bin
+            result_sev = criterion_severity(severity_logits, masks)
+            loss_sev = result_sev[0] if isinstance(result_sev, tuple) else result_sev
+            loss = loss_bin + loss_sev
+            metrics.update(binary_logits, mask_binary)
         else:
-            loss = result
+            logits = model(images)
+            result = criterion(logits, masks)
+            if isinstance(result, tuple):
+                loss, _ = result
+            else:
+                loss = result
+            metrics.update(logits, masks)
 
-        metrics.update(logits, masks)
         total_loss += loss.item()
         num_batches += 1
 
         pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
-    # Compute epoch metrics
     epoch_metrics = metrics.compute()
     epoch_metrics["loss"] = total_loss / num_batches
 
@@ -875,6 +896,7 @@ def train(
     early_stopping_patience: int = 10,
     save_every: int = 5,
     overwrite_output_dir: bool = False,
+    use_dual_head: bool = False,
 ):
     """
     Main training function.
@@ -903,7 +925,10 @@ def train(
         use_tensorboard: Enable TensorBoard logging
         early_stopping_patience: Epochs without improvement before stopping
         save_every: Save checkpoint every N epochs
+        use_dual_head: If True, use FireDualHeadModel (binary + severity); requires num_classes=5 (GRA)
     """
+    if use_dual_head and num_classes != 5:
+        raise SystemExit("--dual-head requires --num-classes 5 (GRA patches).")
     # Setup output directory
     output_dir = Path(output_dir)
     if output_dir.exists():
@@ -935,13 +960,19 @@ def train(
     print(f"  Architecture: {architecture}")
     print(f"{'='*60}\n")
 
+    # Infer input channels from patch data (7 or 8) so model matches your patches
+    in_channels = get_patch_num_channels(patches_dir)
+    print(f"  Input channels (from patches): {in_channels}\n")
+
     # Class names for metrics (use shared constants)
-    class_names = list(get_class_names(num_classes))
+    class_names = list(get_class_names(2 if use_dual_head else num_classes))
 
     # Config for logging
     config = {
         "patches_dir": str(patches_dir),
         "num_classes": num_classes,
+        "in_channels": in_channels,
+        "dual_head": use_dual_head,
         "encoder_name": encoder_name,
         "architecture": architecture,
         "batch_size": batch_size,
@@ -1003,13 +1034,23 @@ def train(
 
     # Create model
     print("\nCreating model...")
-    model = FireSegmentationModel(
+    if use_dual_head:
+        model = FireDualHeadModel(
             encoder_name=encoder_name,
-            num_classes=num_classes,
-            in_channels=7,
+            in_channels=in_channels,
             encoder_weights="imagenet",
             architecture=architecture,
-    )
+        )
+        criterion_severity = CombinedLoss(ce_weight=0.5, dice_weight=0.5, class_weights=class_weights)
+    else:
+        model = FireSegmentationModel(
+            encoder_name=encoder_name,
+            num_classes=num_classes,
+            in_channels=in_channels,
+            encoder_weights="imagenet",
+            architecture=architecture,
+        )
+        criterion_severity = None
     model = model.to(device)
 
     total_params = sum(p.numel() for p in model.parameters())
@@ -1034,6 +1075,10 @@ def train(
             class_weights=class_weights,
         )
 
+    # Dual-head: binary head uses 2 classes, so criterion must have no weights or 2-class weights
+    if use_dual_head:
+        criterion = CombinedLoss(ce_weight=0.5, dice_weight=0.5, class_weights=None)
+
     # Setup optimizer and scheduler
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -1056,11 +1101,13 @@ def train(
         checkpoint = load_checkpoint(resume, model, optimizer)
         start_epoch = checkpoint["epoch"] + 1
         best_metric = checkpoint["metrics"].get("fire_iou", 0)
+        if use_dual_head and isinstance(model, FireDualHeadModel):
+            model.freeze_severity_head()  # keep severity frozen if it was
         print(f"Resuming from epoch {start_epoch}, best fire_iou: {best_metric:.4f}")
 
-    # Setup metrics
-    train_metrics = CombinedMetrics(num_classes=num_classes, class_names=class_names)
-    val_metrics = CombinedMetrics(num_classes=num_classes, class_names=class_names)
+    # Setup metrics (for dual-head we track binary metrics)
+    train_metrics = CombinedMetrics(num_classes=2 if use_dual_head else num_classes, class_names=class_names)
+    val_metrics = CombinedMetrics(num_classes=2 if use_dual_head else num_classes, class_names=class_names)
 
     # Training loop
     print("\n" + "=" * 60)
@@ -1072,12 +1119,16 @@ def train(
     for epoch in range(start_epoch, num_epochs):
         # Train
         train_results = train_epoch(
-            model, train_loader, criterion, optimizer, device, epoch, train_metrics
+            model, train_loader, criterion, optimizer, device, epoch, train_metrics,
+            criterion_severity=criterion_severity,
+            dual_head=use_dual_head,
         )
 
         # Validate
         val_results = validate_epoch(
-            model, val_loader, criterion, device, epoch, val_metrics
+            model, val_loader, criterion, device, epoch, val_metrics,
+            criterion_severity=criterion_severity,
+            dual_head=use_dual_head,
         )
 
         # Update scheduler
@@ -1264,7 +1315,12 @@ def main():
         type=int,
         default=2,
         choices=[2, 5],
-        help="Number of classes (2=DEL binary, 5=GRA severity)",
+        help="Number of classes (2=DEL binary, 5=GRA severity); required 5 for --dual-head",
+    )
+    parser.add_argument(
+        "--dual-head",
+        action="store_true",
+        help="Use FireDualHeadModel (binary + severity heads); requires --num-classes 5",
     )
 
     # Model arguments
@@ -1560,6 +1616,7 @@ def main():
                 wandb_run_name=run_name,
                 early_stopping_patience=args.patience,
                 save_every=args.save_every,
+                use_dual_head=args.dual_head,
             )
 
             results[encoder] = best_metric

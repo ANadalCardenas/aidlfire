@@ -19,6 +19,8 @@ from constants import (
     DEFAULT_STRIDE_TRAIN,
     DEFAULT_STRIDE_INFERENCE,
     DEFAULT_MAX_CLOUD_COVER,
+    RED_INDEX_7,
+    NIR_INDEX_7,
 )
 
 
@@ -32,6 +34,9 @@ class PatchConfig:
 
     # Band indices for 7-band selection: B02, B03, B04, B08, B8A, B11, B12
     band_indices: tuple = BAND_INDICES
+
+    # Include NDVI as 8th channel (vegetation index from Red + NIR)
+    include_ndvi: bool = True
 
     # Value range for clipping (data is already ~normalized)
     clip_min: float = 0.0
@@ -84,10 +89,11 @@ class PatchGenerator:
     def _load_image(self, image_path: Path) -> np.ndarray:
         """Load and preprocess satellite image.
 
-        Supports 12-band GeoTIFF (S2L2A) or 3-band PNG; always returns 7 channels.
+        Supports 12-band GeoTIFF (S2L2A) or 3-band PNG; returns 7 or 8 channels.
+        When include_ndvi is True, appends NDVI as 8th channel (Red/NIR from 7-band array).
 
         Returns:
-            Array of shape (H, W, 7) with selected bands, clipped to [0, 1]
+            Array of shape (H, W, 7) or (H, W, 8) with selected bands (+ NDVI), clipped to [0, 1]
         """
         with rasterio.open(image_path) as src:
             data = src.read()  # (C, H, W)
@@ -104,8 +110,17 @@ class PatchGenerator:
                 )
 
             selected = np.transpose(selected, (1, 2, 0))  # (H, W, 7)
-            selected = np.clip(selected, self.config.clip_min, self.config.clip_max)
-            return selected.astype(np.float32)
+            selected = np.clip(selected, self.config.clip_min, self.config.clip_max).astype(np.float32)
+
+            if self.config.include_ndvi:
+                # NDVI = (NIR - Red) / (NIR + Red + eps), then map [-1, 1] -> [0, 1]
+                red = selected[:, :, RED_INDEX_7]
+                nir = selected[:, :, NIR_INDEX_7]
+                ndvi_raw = (nir - red) / (nir + red + 1e-8)
+                ndvi_01 = np.clip((ndvi_raw + 1.0) / 2.0, 0.0, 1.0).astype(np.float32)
+                selected = np.concatenate([selected, ndvi_01[:, :, np.newaxis]], axis=2)  # (H, W, 8)
+
+            return selected
 
     def _load_mask(self, mask_path: Path) -> np.ndarray:
         """Load mask file (DEL, GRA, or CM).

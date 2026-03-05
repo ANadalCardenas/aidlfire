@@ -5,6 +5,7 @@ A data processing pipeline for the CEMS Wildfire Dataset, designed to prepare Se
 ## Table of Contents
 
 - [Quick Start](#quick-start)
+- [Full workflow: CEMS + Sen2Fire (recommended)](#full-workflow-cems--sen2fire-recommended)
 - [Overview](#overview)
 - [Project Files](#project-files)
 - [Dataset Description](#dataset-description)
@@ -12,6 +13,7 @@ A data processing pipeline for the CEMS Wildfire Dataset, designed to prepare Se
 - [Downloading the Data](#downloading-the-data)
 - [Pipeline Workflow](#pipeline-workflow)
 - [Running the Pipeline](#running-the-pipeline)
+- [Input channels and vegetation (NDVI)](#input-channels-and-vegetation-ndvi)
 - [Region Filtering](#region-filtering)
 - [Using the Patches for Training](#using-the-patches-for-training)
 - [Class Imbalance Analysis](#class-imbalance-analysis)
@@ -63,6 +65,71 @@ uv run python train.py --patches-dir ./patches --output-dir ./output/resnet34-un
 
 **Both download and patch generation support resume**: If interrupted, just re-run the same command and it will skip already-completed work. Use `--force` to regenerate everything.
 
+### Full workflow: CEMS + Sen2Fire (recommended)
+
+Recommended defaults: **NDVI** (8 channels), **dual-head** (binary + severity), **s2cloudless** for Sen2Fire cloud filtering when available.
+
+#### 1. Process the first dataset (CEMS)
+
+```bash
+uv sync --extra train
+
+# Download CEMS data (optional: --splits train for faster testing)
+uv run python download_dataset.py --output-dir ../wildfires-cems
+
+# Generate patches (NDVI included by default; use --no-ndvi to disable)
+uv run python run_pipeline.py \
+    --dataset-dir ../wildfires-cems \
+    --output-dir ./patches
+
+# Optional: analyze class distribution
+uv run python analyze_patches.py ./patches --plot
+```
+
+#### 2. Process the second dataset (Sen2Fire)
+
+Sen2Fire patches are loaded directly from `.npz` files (no separate patch generation). Download the dataset (e.g. from [Zenodo 10881058](https://zenodo.org/records/10881058)) and place it so you have:
+
+```
+data-sen2fire/
+├── scene1/   # .npz files (image 12×512×512, label 512×512)
+├── scene2/
+├── scene3/
+└── scene4/
+```
+
+Cloud filtering uses **s2cloudless** by default when installed (`uv sync --extra train` includes it). Use `--no-s2cloudless` in the fine-tune script to use rule-based filtering only.
+
+#### 3. Train dual-head model on CEMS (GRA severity)
+
+Train with **dual heads** (binary fire + severity) so you can later fine-tune on Sen2Fire while keeping the severity head frozen:
+
+```bash
+# Requires GRA patches (num_classes=5). NDVI is used if patches have 8 channels.
+uv run python train.py \
+    --patches-dir ./patches \
+    --output-dir ./output/dual_head \
+    --num-classes 5 \
+    --dual-head \
+    --epochs 50
+
+# Checkpoints: ./output/dual_head/checkpoints/best_model.pt
+```
+
+#### 4. Fine-tune on Sen2Fire (binary only, severity frozen)
+
+```bash
+uv run python train_sen2fire_finetune.py \
+    --checkpoint ./output/dual_head/checkpoints/best_model.pt \
+    --sen2fire-dir ../data-sen2fire \
+    --output-dir ./output/sen2fire_finetune
+
+# Uses s2cloudless for cloud filtering by default; --no-s2cloudless for rule-based only.
+# Uses NDVI (8 ch) by default if the CEMS checkpoint has 8 channels; --no-ndvi for 7.
+```
+
+Result: a single model that outputs both **binary fire** and **severity** maps. In the app, use the "Show binary fire map" and "Show severity map" toggles to compare. History stores both maps for dual-head results.
+
 ### Run the Web App
 
 ```bash
@@ -93,7 +160,7 @@ pipeline = FireInferencePipeline("checkpoints/best_model.pt")
 # Run on a GeoTIFF file
 result = pipeline.predict_from_file("satellite_image.tif")
 
-# Or on a numpy array (H, W, 7) or (H, W, 12)
+# Or on a numpy array (H, W, 7), (H, W, 8), or (H, W, 12)
 result = pipeline.predict_from_array(image_array)
 
 # Access results
@@ -122,14 +189,15 @@ This pipeline processes satellite imagery from the Copernicus Emergency Manageme
 
 ```
 Raw Sentinel-2 GeoTIFFs     →     256×256 Patches     →     PyTorch DataLoader
-    (12 bands)                    (7 bands, .npy)              (ready for training)
+    (12 bands)                    (7 or 8 channels)            (ready for training)
 ```
 
 1. Loads 12-band Sentinel-2 imagery and selects 7 key spectral bands
-2. Extracts overlapping patches using a sliding window
-3. Filters out cloudy patches (>50% cloud cover)
-4. Saves patches as NumPy arrays with metadata
-5. Provides PyTorch Dataset classes for model training
+2. Optionally adds **NDVI** (vegetation index) as an 8th channel to improve burn vs. vegetation separation
+3. Extracts overlapping patches using a sliding window
+4. Filters out cloudy patches (>50% cloud cover)
+5. Saves patches as NumPy arrays with metadata
+6. Provides PyTorch Dataset classes for model training
 
 ---
 
@@ -159,7 +227,8 @@ Raw Sentinel-2 GeoTIFFs     →     256×256 Patches     →     PyTorch DataLoa
 | File | Purpose |
 |------|---------|
 | `README.md` | This file - pipeline usage and reference |
-| `PATCHES.md` | Detailed explanation of patch format, channels, and loading |
+| `PATCHES.md` | Detailed explanation of patch format, channels (7 or 8), and loading |
+| `CHANGES.md` | Changelog and recent changes (e.g. NDVI extension, options) |
 
 ### What's Included
 
@@ -445,9 +514,9 @@ The pipeline uses a **sliding window** approach to extract patches:
 | Stride | 128 (50% overlap) | 256 (no overlap) |
 | Purpose | Data augmentation via overlap | Clean tiling for reconstruction |
 
-### Stage 2: Band Selection
+### Stage 2: Band selection and vegetation index
 
-From the original 12 Sentinel-2 bands, we select 7 bands useful for fire detection:
+From the original 12 Sentinel-2 bands, we select 7 bands. When NDVI is enabled (default), an 8th channel is added:
 
 | Index | Band | Wavelength | Resolution | Use in Fire Detection |
 |-------|------|------------|------------|----------------------|
@@ -458,8 +527,9 @@ From the original 12 Sentinel-2 bands, we select 7 bands useful for fire detecti
 | 4 | B8A | 865nm (NIR narrow) | 20m | Vegetation/water |
 | 5 | B11 | 1610nm (SWIR1) | 20m | Active fire, burn severity |
 | 6 | B12 | 2190nm (SWIR2) | 20m | Active fire, burn severity |
+| **7** | **NDVI** | (NIR−Red)/(NIR+Red) | — | Vegetation index (when enabled) |
 
-**Why these bands?** SWIR bands (B11, B12) are particularly sensitive to fire and burn scars. NIR bands detect vegetation stress. The combination enables detection of both active fires and post-fire damage.
+**Why these bands?** SWIR bands (B11, B12) are particularly sensitive to fire and burn scars. NIR bands detect vegetation stress. NDVI (when used) helps separate burned vegetation from water/shadow/soil. The combination enables detection of both active fires and post-fire damage.
 
 ### Stage 3: Quality Filtering
 
@@ -477,12 +547,12 @@ if (pixels with value >= 1) / total_pixels > 0.5:
     reject_patch()
 ```
 
-### Stage 4: Output Format
+### Stage 4: Output format
 
 ```
 patches/
 ├── train/
-│   ├── EMSR230_AOI01_01_r0_c0_image.npy      # (256, 256, 7) float32
+│   ├── EMSR230_AOI01_01_r0_c0_image.npy      # (256, 256, 7) or (256, 256, 8) float32
 │   ├── EMSR230_AOI01_01_r0_c0_mask.npy       # (256, 256) uint8
 │   ├── EMSR230_AOI01_01_r0_c128_image.npy
 │   ├── EMSR230_AOI01_01_r0_c128_mask.npy
@@ -536,7 +606,11 @@ Options:
   --splits LIST           Splits to process (default: train val test)
   --max-cloud-cover FLOAT Maximum cloud cover fraction (default: 0.5)
   --skip-extraction       Skip tar extraction if already done
+  --force                 Regenerate all patches (default: skip existing)
+  --no-ndvi               Disable NDVI as 8th channel (output 7 channels only)
 ```
+
+By default, patches include **8 channels** (7 spectral bands + NDVI). Use `--no-ndvi` to generate 7-channel patches only (e.g. for backward compatibility with older checkpoints).
 
 ### Using patch_generator.py Directly
 
@@ -552,6 +626,7 @@ config = PatchConfig(
     stride_train=128,
     stride_inference=256,
     max_cloud_cover=0.5,
+    include_ndvi=True,  # Add NDVI as 8th channel (default: True)
     band_indices=(1, 2, 3, 7, 8, 10, 11),  # 7 bands
     clip_min=0.0,
     clip_max=1.0,
@@ -575,6 +650,30 @@ metadata = generator.process_image(
     mode="train",
 )
 ```
+
+---
+
+## Input channels and vegetation (NDVI)
+
+### Default: 8 channels (7 bands + NDVI)
+
+The pipeline adds a **vegetation index (NDVI)** as an 8th input channel by default. NDVI helps the model separate burn scars from other low-NIR surfaces (e.g. water, shadow, bare soil).
+
+| Channel | Source | Description |
+|---------|--------|-------------|
+| 0–6 | Sentinel-2 | B02, B03, B04, B08, B8A, B11, B12 (same as before) |
+| 7 | **NDVI** | (NIR − Red) / (NIR + Red), mapped from [−1, 1] to [0, 1] |
+
+- **Constants** (`constants.py`): `NUM_INPUT_CHANNELS = 8`, `RED_INDEX_7 = 2`, `NIR_INDEX_7 = 3`, `INPUT_CHANNEL_NAMES`.
+- **Patch generation**: Set `include_ndvi=False` in `PatchConfig` or use `--no-ndvi` in `run_pipeline.py` to output 7-channel patches only.
+- **Training**: The training script uses `NUM_INPUT_CHANNELS` (8) when creating the model and saves `in_channels` in the checkpoint config.
+- **Inference**: The pipeline reads `in_channels` from the checkpoint (default 7 for old checkpoints). If the model expects 8 channels and the input has 7 (e.g. 12-band GeoTIFF), NDVI is computed and appended automatically.
+
+### Backward compatibility
+
+- **Old 7-channel checkpoints**: Load as before; `in_channels` defaults to 7 if missing from config.
+- **New 8-channel runs**: Regenerate patches without `--no-ndvi`, train as usual; checkpoints will have `in_channels: 8`.
+- **Mixed usage**: You can generate 7-channel patches with `--no-ndvi` and train a 7-channel model; the code supports both.
 
 ---
 
@@ -670,7 +769,7 @@ dataset = WildfirePatchDataset(
 )
 
 image, mask = dataset[0]
-# image: torch.Tensor of shape (7, 256, 256), dtype float32
+# image: torch.Tensor of shape (7, 256, 256) or (8, 256, 256), dtype float32
 # mask: torch.Tensor of shape (256, 256), dtype int64
 
 # Option 2: Full data module with all splits
@@ -691,8 +790,8 @@ test_loader = data_module.test_dataloader()
 from dataset import compute_dataset_statistics
 
 stats = compute_dataset_statistics("./patches/train")
-print(f"Mean: {stats['mean']}")  # Shape: (7,)
-print(f"Std:  {stats['std']}")   # Shape: (7,)
+print(f"Mean: {stats['mean']}")  # Shape: (7,) or (8,) depending on patches
+print(f"Std:  {stats['std']}")   # Shape: (7,) or (8,)
 
 # Use in transforms
 from torchvision import transforms
@@ -716,14 +815,14 @@ train_dataset = WildfirePatchDataset("./patches/train")
 train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
 
 # Define model (example: simple U-Net)
-model = YourSegmentationModel(in_channels=7, out_channels=2)  # 2 classes for DEL
+model = YourSegmentationModel(in_channels=8, out_channels=2)  # 8 with NDVI; 2 classes for DEL
 criterion = nn.CrossEntropyLoss()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
 
 # Training loop
 for epoch in range(num_epochs):
     for images, masks in train_loader:
-        # images: (B, 7, 256, 256)
+        # images: (B, 7, 256, 256) or (B, 8, 256, 256)
         # masks: (B, 256, 256) with values 0 or 1
 
         optimizer.zero_grad()
@@ -951,7 +1050,7 @@ dataset = WildfirePatchDataset(
 
 ## Model Training
 
-A complete training pipeline is included for training fire segmentation models.
+A complete training pipeline is included for training fire segmentation models. For the **recommended workflow** (CEMS → Sen2Fire fine-tune with dual-head, NDVI, and s2cloudless), see [Full workflow: CEMS + Sen2Fire](#full-workflow-cems--sen2fire-recommended) above.
 
 ### Quick Start
 
@@ -1256,10 +1355,23 @@ rgb = create_rgb_composite(image, mode="false_color")  # Returns (256, 256, 3)
 
 | Property | Value |
 |----------|-------|
-| **Shape** | (256, 256, 7) |
+| **Shape** | (256, 256, 7) or (256, 256, 8) with NDVI |
 | **Data type** | float32 |
-| **Value range** | [0, 1] (clipped) |
-| **Channel order** | B02, B03, B04, B08, B8A, B11, B12 |
+| **Value range** | [0, 1] (clipped); NDVI raw [−1, 1] mapped to [0, 1] |
+| **Channel order** | B02, B03, B04, B08, B8A, B11, B12 [, NDVI] |
+
+### Checkpoint config (saved with model)
+
+Training saves a `config` dict in each checkpoint. Inference uses it to rebuild the model:
+
+| Key | Description | Default if missing |
+|-----|-------------|--------------------|
+| `num_classes` | 2 (DEL) or 5 (GRA) | 2 |
+| `in_channels` | 7 or 8 (with NDVI) | 7 |
+| `encoder_name` | Backbone (e.g. resnet34) | resnet34 |
+| `architecture` | unet, unetplusplus, deeplabv3plus | unet |
+
+Old checkpoints without `in_channels` are loaded with 7 channels. New training runs save `in_channels: 8` when using the default (NDVI enabled).
 
 ### Coordinate Reference System
 

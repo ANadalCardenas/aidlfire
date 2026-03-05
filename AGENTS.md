@@ -54,9 +54,10 @@ CEMS-Wildfire-Dataset-main/
 
 ### 1. Input Data
 - **Source**: Sentinel-2 satellite (12 spectral bands)
-- **Selected bands**: 7 of 12 (indices 1,2,3,7,8,10,11)
+- **Selected bands**: 7 of 12 (indices 1,2,3,7,8,10,11); optional **NDVI** as 8th channel (default: on)
 - **File format**: GeoTIFF (.tif)
 - **Naming**: `EMSR{id}_AOI{area}_{tile}_S2L2A.tif`
+- **Constants**: `NUM_INPUT_CHANNELS=8`, `include_ndvi=True` in `PatchConfig`; use `--no-ndvi` for 7 channels
 
 ### 2. Labels (Ground Truth)
 - **DEL mask**: Binary (0=no fire, 1=fire) - use for segmentation
@@ -66,7 +67,7 @@ CEMS-Wildfire-Dataset-main/
 ### 3. Patches
 - **Size**: 256×256 pixels
 - **Format**: NumPy arrays (.npy)
-- **Image**: (256, 256, 7) float32, normalized 0-1
+- **Image**: (256, 256, 7) or (256, 256, 8) float32, normalized 0-1 (8 = 7 bands + NDVI when `include_ndvi=True`)
 - **Mask**: (256, 256) uint8
 
 ### 4. Fire Detection Signal
@@ -101,6 +102,7 @@ uv run python download_dataset.py --generate-patches --patches-dir ./patches
 ```bash
 cd fire-pipeline
 uv run python run_pipeline.py --skip-extraction --output-dir ./patches
+# Default: 8 channels (7 bands + NDVI). Use --no-ndvi for 7 channels only.
 ```
 
 ### Task: Run inference on new images
@@ -176,7 +178,7 @@ uv run python train.py --patches-dir ./patches --output-dir ./output/run1 --num-
 | Validation images | ~80 |
 | Test images | ~80 |
 | Patch size | 256×256 |
-| Input channels | 7 |
+| Input channels | 7 or 8 (8 = 7 bands + NDVI by default) |
 | DEL classes | 2 (binary) |
 | GRA classes | 5 (severity) |
 | Countries covered | 19 (mostly Mediterranean Europe) |
@@ -234,7 +236,7 @@ uv sync --extra all        # Everything
 
 1. **Check GRA availability** - Not all images have severity masks
 2. **Mind the cloud mask** - Cloudy pixels are unreliable
-3. **Patches are NumPy, not images** - 7 channels, float32
+3. **Patches are NumPy, not images** - 7 or 8 channels, float32
 4. **Labels are TIF files** - DEL.tif and GRA.tif are the masks
 5. **~4% images have no fire** - Edge tiles with pixelBurned=0
 6. **Mock mode by default** - App uses mock fetcher, set `USE_MOCK_FETCHER=False` for real data

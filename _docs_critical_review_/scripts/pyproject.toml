@@ -1,0 +1,14 @@
+[project]
+name = "docs-scripts"
+version = "0.1.0"
+description = "Scripts to export sample images for _docs_ (e.g. EO4WildFires)"
+requires-python = ">=3.12"
+dependencies = [
+    "datasets==3.6.0",
+    "matplotlib>=3.8",
+    "numpy>=1.24",
+    "xarray",
+    "netCDF4",
+    "rioxarray",
+]
+

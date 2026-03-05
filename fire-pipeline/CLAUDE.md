@@ -15,9 +15,12 @@ This is a **complete fire detection pipeline** for training and deploying deep l
 ## Key Technical Details
 
 ### Band Selection
-From the original 12 Sentinel-2 bands, we select 7 useful ones:
+From the original 12 Sentinel-2 bands, we select 7 useful ones. When NDVI is enabled (default), an 8th channel is added.
+
 ```python
 band_indices = (1, 2, 3, 7, 8, 10, 11)  # 0-indexed
+NUM_INPUT_CHANNELS = 8   # 7 bands + NDVI (use 7 if include_ndvi=False)
+RED_INDEX_7, NIR_INDEX_7 = 2, 3  # For NDVI: (NIR - Red) / (NIR + Red)
 ```
 
 | Index | Band | Wavelength | Purpose |
@@ -29,6 +32,7 @@ band_indices = (1, 2, 3, 7, 8, 10, 11)  # 0-indexed
 | 4 | B8A (NIR narrow) | 865nm | Vegetation boundary |
 | 5 | B11 (SWIR1) | 1610nm | **Fire detection** (HIGH when burned) |
 | 6 | B12 (SWIR2) | 2190nm | **Fire detection** (HIGH when burned) |
+| 7 | NDVI | (NIR−Red)/(NIR+Red) | Vegetation index (when enabled) |
 
 **Fire signature**: LOW NIR (bands 3-4) + HIGH SWIR (bands 5-6) = burned area
 
@@ -37,8 +41,9 @@ band_indices = (1, 2, 3, 7, 8, 10, 11)  # 0-indexed
 - **Training stride**: 128 (50% overlap for more samples)
 - **Inference stride**: 256 (no overlap)
 - **Output format**: NumPy arrays (.npy), NOT images
-- **Image shape**: (256, 256, 7) float32, values 0-1
+- **Image shape**: (256, 256, 7) or (256, 256, 8) float32, values 0-1 (NDVI stored as [0,1] from raw [−1,1])
 - **Mask shape**: (256, 256) uint8, values 0-1 (DEL) or 0-4 (GRA)
+- **NDVI**: Default on; disable with `PatchConfig(include_ndvi=False)` or `run_pipeline.py --no-ndvi`
 
 ### Mask Types
 - **DEL (Delineation)**: Binary mask (0=no fire, 1=fire)
@@ -98,6 +103,7 @@ uv run python download_dataset.py --output-dir ../wildfires-cems
 ```bash
 cd fire-pipeline
 uv run python run_pipeline.py --skip-extraction --output-dir ./patches
+# 8 channels (7 bands + NDVI) by default; use --no-ndvi for 7 channels only
 ```
 
 ### Load Patches for Training
@@ -106,7 +112,7 @@ from dataset import WildfirePatchDataset, WildfireDataModule
 
 # Single dataset
 dataset = WildfirePatchDataset("./patches/train")
-image, mask = dataset[0]  # (7,256,256), (256,256)
+image, mask = dataset[0]  # (7,256,256) or (8,256,256), (256,256)
 
 # Full data module (with default augmentation)
 dm = WildfireDataModule("./patches", batch_size=32)
@@ -216,7 +222,7 @@ Catalan fires were moved to `wildfires-cems/data/cat/` for regional testing:
 
 ```python
 # After DataLoader
-images.shape  # (batch, 7, 256, 256) - channels first
+images.shape  # (batch, 7, 256, 256) or (batch, 8, 256, 256) - channels first
 masks.shape   # (batch, 256, 256) - class indices
 
 # For segmentation model
