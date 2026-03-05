@@ -1,0 +1,2 @@
+dataset,model_name,wandb_run_name,MAP_50_95,VAL_F1,FIRE_IOU,val_loss,val_precision,val_recall,map_50,f1,val_accuracy,val_auc_roc,fire_dice,mean_iou,train_time_s,num_params,best_epoch
+1rst dataset,cnn_scratch,cnn_scratch_e15_bs16_lr3e-4_wd1e-3,,0.6549466742140151,,0.41013553584314355,0.6934796683398642,0.6570180659619966,,,0.8794191918623344,0.9332069008730522,,,964.17,97489,10
