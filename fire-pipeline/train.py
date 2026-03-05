@@ -362,7 +362,7 @@ def train_scratch_classifier(
     val_loader = dm.val_dataloader()
 
     # Model
-    model = ScratchFireModel(in_channels=7, dropout=dropout).to(device_t)
+    model = ScratchFireModel(in_channels=get_patch_num_channels(patches_dir), dropout=dropout).to(device_t)
     total_params = sum(p.numel() for p in model.parameters())
     best_ckpt_path = checkpoints_dir / "best_model.pt"   
 
@@ -680,7 +680,7 @@ def train_unet_scratch_segmentation(
 
     # Model (UNet from scratch)
     print("\nCreating scratch U-Net model...")
-    model = UNet(in_channels=7, num_classes=num_classes, retainDim=True).to(device_t)
+    model = UNet(in_channels=get_patch_num_channels(patches_dir), num_classes=num_classes, retainDim=True).to(device_t)
 
     total_params = sum(p.numel() for p in model.parameters())
     trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -1628,8 +1628,9 @@ def main():
         best_epoch = 0  # default; YOLO doesn't track per-epoch best
         yolo_run_name = args.run_name or _make_run_name("yolo", args)
 
+        yolo_channels = get_patch_num_channels(args.patches_dir)
         print("\n" + "#" * 80)
-        print("TRAINING YOLOv8 DETECTION (7-CHANNEL)")
+        print(f"TRAINING YOLOv8 DETECTION ({yolo_channels}-CHANNEL)")
         print("#" * 80 + "\n")
 
         metrics = export_yolo_det7_dataset(
@@ -1637,7 +1638,7 @@ def main():
             export_root=args.output_dir,
             num_classes=args.num_classes,
             export_cfg=ExportDet7Cfg(
-                channels=7,
+                channels=yolo_channels,
                 mask_to_boxes_mode="components",
                 min_box_area_px=10,
             ),
