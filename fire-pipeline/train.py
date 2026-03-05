@@ -38,6 +38,8 @@ from metric_logger import MetricLogger
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+import time
+from utils_report import print_run_summary, append_results_csv
 
 
 from dataset import (
@@ -256,6 +258,25 @@ def _binary_metrics_from_logits(logits: torch.Tensor, y: torch.Tensor) -> dict:
     return {"acc": acc, "precision": precision, "recall": recall, "f1": f1}
 
 
+def _make_run_name(model: str, args) -> str:
+    """Generate a descriptive W&B run name from model name and CLI args."""
+    import re
+
+    def _fmt(v: float) -> str:
+        s = f"{v:.0e}"
+        return re.sub(r"e([+-])0*(\d+)", lambda m: f"e{m.group(1)}{m.group(2)}", s)
+
+    parts = [model, f"e{args.epochs}", f"bs{args.batch_size}",
+             f"lr{_fmt(args.lr)}", f"wd{_fmt(args.weight_decay)}"]
+    if getattr(args, "focal_loss", False):
+        parts.append(f"focal{args.focal_gamma}")
+    if getattr(args, "weighted_sampling", False):
+        parts.append("ws")
+    if getattr(args, "no_fire_augment", False):
+        parts.append("noaug")
+    return "_".join(parts)
+
+
 def train_scratch_classifier(
     patches_dir: Path,
     output_dir: Path,
@@ -270,6 +291,8 @@ def train_scratch_classifier(
     report_to_tune: bool = False,
     wandb_project: str | None = None,
     wandb_run_name: str | None = None,
+    results_csv: Path | None = None,
+    dataset: str = "1rst dataset",
 ):
 
     """
@@ -282,6 +305,12 @@ def train_scratch_classifier(
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
 
     device_t = get_device(device)
+
+    # Report print
+    t0 = time.perf_counter()
+    if device_t.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device_t)    
+   
 
     wandb = None
     if wandb_project:
@@ -313,6 +342,8 @@ def train_scratch_classifier(
 
     # Model
     model = ScratchFireModel(in_channels=7, dropout=dropout).to(device_t)
+    total_params = sum(p.numel() for p in model.parameters())
+    best_ckpt_path = checkpoints_dir / "best_model.pt"   
 
     # Loss + Optim
     if pos_weight is not None:
@@ -321,7 +352,8 @@ def train_scratch_classifier(
         criterion = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
 
-    best_val_loss = float("inf")
+    best_val_f1 = -1.0
+    best_metrics = {}
 
     for epoch in range(num_epochs):
         model.train()
@@ -334,7 +366,7 @@ def train_scratch_classifier(
             masks = masks.to(device_t)
 
             # binary label from mask
-            y = (masks > 0).any(dim=(1, 2)).float()
+            y = _binary_labels_from_mask(masks)
 
             optimizer.zero_grad()
             logits = model(images) 
@@ -361,6 +393,8 @@ def train_scratch_classifier(
         model.eval()
         val_loss = 0.0
         val_acc = val_prec = val_rec = val_f1 = 0.0
+        val_probs_all = []
+        val_labels_all = []
         n = 0
 
         with torch.no_grad():
@@ -377,6 +411,9 @@ def train_scratch_classifier(
                 val_rec += m["recall"]
                 val_f1 += m["f1"]
 
+                val_probs_all.append(torch.sigmoid(logits).cpu())
+                val_labels_all.append(y.cpu())
+
                 val_loss += loss.item()
                 n += 1
 
@@ -386,14 +423,23 @@ def train_scratch_classifier(
         val_rec /= max(n, 1)
         val_f1 /= max(n, 1)
 
+        try:
+            from sklearn.metrics import roc_auc_score
+            import numpy as np
+            probs_np = torch.cat(val_probs_all).numpy()
+            labels_np = torch.cat(val_labels_all).numpy()
+            val_auc = float(roc_auc_score(labels_np, probs_np)) if len(np.unique(labels_np)) > 1 else 0.0
+        except Exception:
+            val_auc = 0.0
+
         if report_to_tune:
             tune.report(val_loss=val_loss, train_loss=train_loss, epoch=epoch)
 
         print(
             f"\nScratch Epoch {epoch}: "
             f"train_loss={train_loss:.4f} val_loss={val_loss:.4f} | "
-            f"val_acc={val_acc:.4f} val_f1={val_f1:.4f} val_prec={val_prec:.4f} val_rec={val_rec:.4f}"
-)
+            f"val_acc={val_acc:.4f} val_f1={val_f1:.4f} val_prec={val_prec:.4f} val_rec={val_rec:.4f} val_auc={val_auc:.4f}"
+        )
         if wandb:
             wandb.log({
                 "epoch": epoch,
@@ -409,17 +455,33 @@ def train_scratch_classifier(
                 "val/precision": val_prec,
                 "val/recall": val_rec,
                 "val/f1": val_f1,
+                "val/auc": val_auc,
             })
 
-        # Save best checkpoint (lowest val loss)
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
+        # Save best checkpoint (highest val_f1)
+        if val_f1 > best_val_f1:
+            best_val_f1 = float(val_f1)
+            best_epoch = epoch
+            best_metrics = {
+                "val_loss": float(val_loss),
+                "val_acc": float(val_acc),
+                "val_precision": float(val_prec),
+                "val_recall": float(val_rec),
+                "val_f1": float(val_f1),
+                "val_auc": float(val_auc),
+                "train_loss": float(train_loss),
+                "train_acc": float(train_acc),
+                "train_precision": float(train_prec),
+                "train_recall": float(train_rec),
+                "train_f1": float(train_f1),
+                "lr": float(optimizer.param_groups[0]["lr"]),
+            }
             save_checkpoint(
                 model=model,
                 optimizer=optimizer,
                 epoch=epoch,
-                metrics={"val_loss": best_val_loss},
-                path=checkpoints_dir / "best_model.pt",
+                metrics=best_metrics,
+                path=best_ckpt_path,
                 config={
                     "model": "ScratchFireModel",
                     "patches_dir": str(patches_dir),
@@ -430,10 +492,38 @@ def train_scratch_classifier(
                     "device": str(device_t),
                 },
             )
-            print(f"  ✓ Saved best scratch model (val_loss={best_val_loss:.4f})")
+            print(f"  ✓ Saved best scratch model (val_f1={best_val_f1:.4f})")
+
+    train_time_s = time.perf_counter() - t0
+    
+    print_run_summary(
+        title="SCRATCH CLASSIFIER",
+        train_time_s=train_time_s,
+        best_checkpoint=str(best_ckpt_path),
+        best_epoch=best_epoch,
+        best_metrics=best_metrics,
+        num_params=total_params,
+    )
+
+    if results_csv is not None:
+        append_results_csv(results_csv, {
+            "dataset": dataset,
+            "model_name": "cnn_scratch",
+            "wandb_run_name": wandb_run_name if wandb_project else "-",
+            "VAL_F1": best_metrics.get("val_f1", ""),
+            "val_loss": best_metrics.get("val_loss", ""),
+            "val_precision": best_metrics.get("val_precision", ""),
+            "val_recall": best_metrics.get("val_recall", ""),
+            "val_accuracy": best_metrics.get("val_acc", ""),
+            "val_auc_roc": best_metrics.get("val_auc", ""),
+            "train_time_s": round(train_time_s, 2),
+            "num_params": total_params,
+            "best_epoch": best_epoch,
+        })
+
     if wandb:
         wandb.finish()
-    return best_val_loss
+    return best_val_f1
 
 
 def train_unet_scratch_segmentation(
@@ -458,6 +548,8 @@ def train_unet_scratch_segmentation(
     early_stopping_patience: int = 10,
     save_every: int = 5,
     overwrite_output_dir: bool = False,
+    results_csv: Path | None = None,
+    dataset: str = "1rst dataset",
 ) -> float:
     """
     Baseline training loop for the U-Net from scratch (segmentation).
@@ -484,6 +576,13 @@ def train_unet_scratch_segmentation(
     # Setup device
     device_t = get_device(device)
     device_label = get_device_name(device_t)
+
+    t0 = time.perf_counter()
+    if device_t.type == "cuda":
+        torch.cuda.reset_peak_memory_stats(device_t)
+
+    best_metrics = {}
+    best_ckpt_path = checkpoints_dir / "best_model.pt"
 
     print(f"\n{'='*60}")
     print(f"  U-NET FROM SCRATCH (BASELINE SEGMENTATION)")
@@ -600,6 +699,8 @@ def train_unet_scratch_segmentation(
     print("=" * 60 + "\n")
 
     best_metric = 0.0
+    best_epoch = -1
+    best_val_results = None
     epochs_without_improvement = 0
 
     for epoch in range(num_epochs):
@@ -616,7 +717,10 @@ def train_unet_scratch_segmentation(
         print(f"  Train Loss: {train_results['loss']:.4f}")
         print(f"  Val Loss: {val_results['loss']:.4f}")
         print(f"  Val Fire IoU: {val_results['fire_iou']:.4f}")
+        print(f"  Val Fire Dice: {val_results['fire_dice']:.4f}")
+        print(f"  Val Fire Precision: {val_results['fire_precision']:.4f}")
         print(f"  Val Fire Recall: {val_results['fire_recall']:.4f}")
+        print(f"  Val Mean IoU: {val_results['mean_iou']:.4f}")
         print(f"  Val Detection F1: {val_results['detection_f1']:.4f}")
 
         metric_logger.log(epoch, "train", train_results)
@@ -629,7 +733,10 @@ def train_unet_scratch_segmentation(
 
             writer.add_scalar("val/loss", val_results["loss"], epoch)
             writer.add_scalar("val/fire_iou", val_results["fire_iou"], epoch)
+            writer.add_scalar("val/fire_dice", val_results["fire_dice"], epoch)
+            writer.add_scalar("val/fire_precision", val_results["fire_precision"], epoch)
             writer.add_scalar("val/fire_recall", val_results["fire_recall"], epoch)
+            writer.add_scalar("val/mean_iou", val_results["mean_iou"], epoch)
             writer.add_scalar("val/detection_f1", val_results["detection_f1"], epoch)
 
             writer.add_scalar("lr", optimizer.param_groups[0]["lr"], epoch)
@@ -647,7 +754,10 @@ def train_unet_scratch_segmentation(
                 "train/detection_f1": train_results["detection_f1"],
                 "val/loss": val_results["loss"],
                 "val/fire_iou": val_results["fire_iou"],
+                "val/fire_dice": val_results["fire_dice"],
+                "val/fire_precision": val_results["fire_precision"],
                 "val/fire_recall": val_results["fire_recall"],
+                "val/mean_iou": val_results["mean_iou"],
                 "val/detection_f1": val_results["detection_f1"],
                 "lr": optimizer.param_groups[0]["lr"],
             })
@@ -655,7 +765,15 @@ def train_unet_scratch_segmentation(
         # Save best model (by fire IoU)
         if val_results["fire_iou"] > best_metric:
             best_metric = float(val_results["fire_iou"])
-            epochs_without_improvement = 0
+            best_epoch = epoch
+            best_metrics = {
+                k: float(v) if isinstance(v, (int, float)) else v
+                for k, v in val_results.items()
+            }
+            best_metrics["train_loss"] = float(train_results["loss"])
+            best_metrics["train_fire_iou"] = float(train_results["fire_iou"])
+            best_metrics["train_detection_f1"] = float(train_results["detection_f1"])
+            best_metrics["lr"] = float(optimizer.param_groups[0]["lr"])
 
             save_checkpoint(
                 model=model,
@@ -695,18 +813,39 @@ def train_unet_scratch_segmentation(
         config=config,
     )
 
-    print("\n" + "=" * 60)
-    print("  TRAINING COMPLETE")
-    print("=" * 60)
-    print(f"  Best Fire IoU: {best_metric:.4f}")
-    print(f"  Checkpoints saved to: {checkpoints_dir}")
-
     if writer:
         writer.flush()
         writer.close()
 
     if wandb:
         wandb.finish()
+
+    train_time_s = time.perf_counter() - t0
+
+    print_run_summary(
+        title="SCRATCH U-NET",
+        train_time_s=train_time_s,
+        best_checkpoint=str(best_ckpt_path),
+        best_epoch=best_epoch,
+        best_metrics=best_metrics,
+        num_params=total_params,
+    )
+
+    if results_csv is not None:
+        append_results_csv(results_csv, {
+            "dataset": dataset,
+            "model_name": "unet_scratch",
+            "wandb_run_name": wandb_run_name if wandb_project else "-",
+            "FIRE_IOU": best_metrics.get("fire_iou", ""),
+            "val_loss": best_metrics.get("loss", ""),
+            "val_precision": best_metrics.get("fire_precision", ""),
+            "val_recall": best_metrics.get("fire_recall", ""),
+            "fire_dice": best_metrics.get("fire_dice", ""),
+            "mean_iou": best_metrics.get("mean_iou", ""),
+            "train_time_s": round(train_time_s, 2),
+            "num_params": total_params,
+            "best_epoch": best_epoch,
+        })
 
     return best_metric
 
@@ -1202,6 +1341,8 @@ def main():
     parser.add_argument("--wandb", action="store_true", help="Enable W&B logging")
     parser.add_argument("--project", type=str, default="fire-detection", help="W&B project name")
     parser.add_argument("--run-name", type=str, default=None, help="W&B run name")
+    parser.add_argument("--results-csv", type=Path, default=Path("training_results.csv"),
+                        help="Path to CSV file where training results are appended (default: training_results.csv)")
     parser.add_argument("--tensorboard", action="store_true", default=True, help="Enable TensorBoard logging (default: enabled)")
     parser.add_argument("--no-tensorboard", action="store_false", dest="tensorboard", help="Disable TensorBoard logging")
 
@@ -1380,7 +1521,7 @@ def main():
         results = {}
 
     # Skip encoder training if ONLY special models (YOLO/scratch) are requested
-    skip_encoders = (args.include_yolo or args.include_scratch or args.include_unet_scratch) and args.encoder == "resnet18"
+    skip_encoders = (args.include_yolo or args.include_scratch or args.include_unet_scratch) and args.all_encoders == "false"
     
     # Runing bag of models
     # SMP models
@@ -1427,6 +1568,8 @@ def main():
     if args.include_yolo:
         from yolo_dataset_exporter import export_yolo_det7_dataset, ExportDet7Cfg
         from yolo_runner import YoloDetTrainCfg
+        best_epoch = 0  # default; YOLO doesn't track per-epoch best
+        yolo_run_name = args.run_name or _make_run_name("yolo", args)
 
         print("\n" + "#" * 80)
         print("TRAINING YOLOv8 DETECTION (7-CHANNEL)")
@@ -1445,22 +1588,47 @@ def main():
                 imgsz=512,
                 batch=args.batch_size,
                 epochs=args.epochs,
-                device="0", 
+                device=args.device,
                 model_weights="yolov8n.pt",
             ),
             num_workers=args.num_workers,
         )
 
-        print("YOLO validation metrics:", metrics.get("val_results"))
+        # Report block
+        print_run_summary(
+            title="YOLO DET",
+            train_time_s=float(metrics["train_time_s"]),
+            best_checkpoint=str(metrics["best_checkpoint"]),
+            best_epoch=best_epoch,
+            best_metrics=dict(metrics["best_metrics"]),
+            num_params=int(metrics["num_params"]),
+        )
+
+        if args.results_csv is not None:
+            yolo_m = dict(metrics["best_metrics"])
+            append_results_csv(args.results_csv, {
+                "dataset": "1rst dataset",
+                "model_name": "yolo",
+                "wandb_run_name": yolo_run_name if args.wandb else "-",
+                "MAP_50_95": yolo_m.get("metrics/mAP50-95(B)", ""),
+                "map_50": yolo_m.get("metrics/mAP50(B)", ""),
+                "val_precision": yolo_m.get("metrics/precision(B)", ""),
+                "val_recall": yolo_m.get("metrics/recall(B)", ""),
+                "f1": yolo_m.get("metrics/f1(B)", ""),
+                "train_time_s": round(float(metrics["train_time_s"]), 2),
+                "num_params": int(metrics["num_params"]),
+                "best_epoch": best_epoch,
+            })
+        
 
     # From Scratch model
     if args.include_scratch:
         print("\n" + "#" * 80)
         print("TRAINING SCRATCH MODEL (BINARY CLASSIFIER)")
         print("#" * 80 + "\n")
-        run_name = args.run_name or f"scratch-classifier-lr-{args.lr}-wd-{args.weight_decay}-e-{args.epochs}"
+        run_name = args.run_name or _make_run_name("cnn_scratch", args)
 
-        best_val_loss = train_scratch_classifier(
+        train_scratch_classifier(
             patches_dir=args.patches_dir,
             output_dir=args.output_dir,
             batch_size=args.batch_size,
@@ -1470,9 +1638,9 @@ def main():
             num_workers=args.num_workers,
             device=args.device,
             wandb_project=wandb_project,
-            wandb_run_name=run_name
+            wandb_run_name=run_name,
+            results_csv=args.results_csv,
         )
-        print(f"Scratch best val loss: {best_val_loss:.4f}")
 
     # U-Net from scratch (segmentation) baseline
     if args.include_unet_scratch:
@@ -1480,7 +1648,9 @@ def main():
         print("TRAINING U-NET FROM SCRATCH (SEGMENTATION BASELINE)")
         print("#" * 80 + "\n")
 
-        best_metric = train_unet_scratch_segmentation(
+        unet_run_name = args.run_name or _make_run_name("unet_scratch", args)
+
+        train_unet_scratch_segmentation(
             patches_dir=args.patches_dir,
             output_dir=args.output_dir,
             num_classes=args.num_classes,
@@ -1497,14 +1667,13 @@ def main():
             num_workers=args.num_workers,
             device=args.device,
             wandb_project=(args.project if args.wandb else None),
-            wandb_run_name=(args.run_name or f"unet-scratch-c{args.num_classes}"),
+            wandb_run_name=unet_run_name,
             use_tensorboard=args.tensorboard,
             early_stopping_patience=args.patience,
             save_every=args.save_every,
             overwrite_output_dir=args.overwrite_output_dir,
+            results_csv=args.results_csv,
         )
-
-        print(f"Scratch U-Net best fire IoU: {best_metric:.4f}")
 
 if __name__ == "__main__":
     main()
