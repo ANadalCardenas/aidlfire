@@ -27,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 
+
 @dataclass
 class YoloDetTrainCfg:
     """
@@ -62,6 +63,9 @@ def train_and_validate_yolo_det7(
         Dict with train/val metrics (when available).
     """
     from ultralytics import YOLO
+    import time
+    import torch
+    from pathlib import Path
 
     data_yaml = Path(data_yaml)
     output_dir = Path(output_dir)
@@ -69,34 +73,64 @@ def train_and_validate_yolo_det7(
     # Load a detection model (NOT segmentation).
     model = YOLO(cfg.model_weights)
 
-    # Train
+    # parameter count
+    num_params = sum(p.numel() for p in model.model.parameters())
+
+    # start timing
+    t0 = time.perf_counter()
+
+    use_cuda = torch.cuda.is_available() and cfg.device not in ("cpu", "mps")
+    if use_cuda:
+        torch.cuda.reset_peak_memory_stats()
+
+    # -----------------------
+    # training
+    # -----------------------
     train_res = model.train(
         data=str(data_yaml),
-        task="detect",
         imgsz=cfg.imgsz,
-        batch=cfg.batch,
         epochs=cfg.epochs,
+        batch=cfg.batch,
         device=cfg.device,
-        project=str(output_dir),
-        name="runs",
         exist_ok=True,
-
-        # IMPORTANT for multispectral:
-        # HSV augmentations assume RGB semantics -> disable.
-        hsv_h=0.0,
-        hsv_s=0.0,
-        hsv_v=0.0,
     )
 
-    # Validate
+    # -----------------------
+    # validation
+    # -----------------------
     val_res = model.val(
         data=str(data_yaml),
-        task="detect",
+        imgsz=cfg.imgsz,
         device=cfg.device,
     )
 
+    # stop timer
+    train_time_s = time.perf_counter() - t0
+
+    # peak GPU memory
+    peak_mem_mb = None
+    device_name = str(cfg.device)
+
+    if use_cuda:
+        peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
+        device_name = torch.cuda.get_device_name(0)
+
+    # locate best checkpoint
+    run_dir = Path(train_res.save_dir)
+    best_ckpt = run_dir / "weights" / "best.pt"
+
+    val_dict = getattr(val_res, "results_dict", {}) or {}
+
+    # Compute F1 from precision and recall (not reported directly by Ultralytics)
+    p = val_dict.get("metrics/precision(B)", 0.0)
+    r = val_dict.get("metrics/recall(B)", 0.0)
+    val_dict["metrics/f1(B)"] = 2 * p * r / (p + r + 1e-9)
+
     return {
-        "data_yaml": str(data_yaml),
-        "train_results": getattr(train_res, "results_dict", None),
-        "val_results": getattr(val_res, "results_dict", None),
-    }
+        "train_time_s": train_time_s,
+        "best_checkpoint": str(best_ckpt),
+        "best_metrics": val_dict,
+        "num_params": num_params,
+        "device_name": device_name,
+        "peak_mem_mb": peak_mem_mb,
+    }  
