@@ -152,6 +152,7 @@ def train_epoch(
     *,
     criterion_severity: nn.Module | None = None,
     dual_head: bool = False,
+    max_batches: int | None = None,
 ) -> dict:
     """Train for one epoch."""
     model.train()
@@ -201,6 +202,9 @@ def train_epoch(
 
         pbar.set_postfix({"loss": f"{loss.item():.4f}"})
 
+        if max_batches is not None and num_batches >= max_batches:
+            break
+
     epoch_metrics = metrics.compute()
     epoch_metrics["loss"] = total_loss / num_batches
     for k, v in loss_components.items():
@@ -220,6 +224,7 @@ def validate_epoch(
     *,
     criterion_severity: nn.Module | None = None,
     dual_head: bool = False,
+    max_batches: int | None = None,
 ) -> dict:
     """Validate for one epoch."""
     model.eval()
@@ -256,6 +261,9 @@ def validate_epoch(
         num_batches += 1
 
         pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+
+        if max_batches is not None and num_batches >= max_batches:
+            break
 
     epoch_metrics = metrics.compute()
     epoch_metrics["loss"] = total_loss / num_batches
@@ -327,6 +335,7 @@ def train_scratch_classifier(
     wandb_run_name: str | None = None,
     results_csv: Path | None = None,
     dataset: str = "1rst dataset",
+    max_batches: int | None = None,
 ):
 
     """
@@ -418,6 +427,9 @@ def train_scratch_classifier(
             train_loss += loss.item()
             n += 1
 
+            if max_batches is not None and n >= max_batches:
+                break
+
         train_loss /= max(n, 1)
         train_acc /= max(n, 1)
         train_prec /= max(n, 1)
@@ -450,6 +462,9 @@ def train_scratch_classifier(
 
                 val_loss += loss.item()
                 n += 1
+
+                if max_batches is not None and n >= max_batches:
+                    break
 
         val_loss /= max(n, 1)
         val_acc /= max(n, 1)
@@ -584,6 +599,7 @@ def train_unet_scratch_segmentation(
     overwrite_output_dir: bool = False,
     results_csv: Path | None = None,
     dataset: str = "1rst dataset",
+    max_batches: int | None = None,
 ) -> float:
     """
     Baseline training loop for the U-Net from scratch (segmentation).
@@ -739,10 +755,12 @@ def train_unet_scratch_segmentation(
 
     for epoch in range(num_epochs):
         train_results = train_epoch(
-            model, train_loader, criterion, optimizer, device_t, epoch, train_metrics
+            model, train_loader, criterion, optimizer, device_t, epoch, train_metrics,
+            max_batches=max_batches,
         )
         val_results = validate_epoch(
-            model, val_loader, criterion, device_t, epoch, val_metrics
+            model, val_loader, criterion, device_t, epoch, val_metrics,
+            max_batches=max_batches,
         )
 
         scheduler.step(val_results["fire_iou"])
@@ -910,6 +928,7 @@ def train(
     save_every: int = 5,
     overwrite_output_dir: bool = False,
     use_dual_head: bool = False,
+    max_batches: int | None = None,
 ):
     """
     Main training function.
@@ -1135,6 +1154,7 @@ def train(
             model, train_loader, criterion, optimizer, device, epoch, train_metrics,
             criterion_severity=criterion_severity,
             dual_head=use_dual_head,
+            max_batches=max_batches,
         )
 
         # Validate
@@ -1142,6 +1162,7 @@ def train(
             model, val_loader, criterion, device, epoch, val_metrics,
             criterion_severity=criterion_severity,
             dual_head=use_dual_head,
+            max_batches=max_batches,
         )
 
         # Update scheduler
@@ -1269,6 +1290,7 @@ def tune_trainable(config, fixed):
         wandb_run_name=None,
         early_stopping_patience=fixed["early_stopping_patience"],
         save_every=fixed["save_every"],
+        max_batches=fixed.get("max_batches"),
     )
 
     ray_report({"fire_iou": best_metric})
@@ -1294,6 +1316,7 @@ def tune_scratch_trainable(config, fixed):
         dropout=config.get("dropout", 0.3),
         pos_weight=config.get("pos_weight", None),
         report_to_tune=True,
+        max_batches=fixed.get("max_batches"),
     )
 
     ray_report({"val_loss": best_val_loss})
@@ -1321,6 +1344,7 @@ def tune_unet_scratch_trainable(config, fixed):
         num_workers=fixed["num_workers"],
         device=fixed["device"],
         overwrite_output_dir=True,
+        max_batches=fixed.get("max_batches"),
     )
 
     ray_report({"fire_iou": best_fire_iou})
@@ -1507,8 +1531,19 @@ def main():
         default=3,
         help="Number of best trials to re-run with W&B and CSV logging after tuning (default: 3)",
     )
+    parser.add_argument(
+        "--smoke-test",
+        action="store_true",
+        help="Run a tiny smoke test: 1 epoch, 2 tune trials, top-1 rerun, 5 batches per epoch",
+    )
 
     args = parser.parse_args()
+
+    if args.smoke_test:
+        print("[SMOKE TEST] Overriding: epochs=1, tune_samples=2, tune_top_k=1, max_batches=5")
+        args.epochs = 1
+        args.tune_samples = 2
+        args.tune_top_k = 1
     train_all_encoders = args.all_encoders == "true"
     encoders_to_train = (
         ENCODER_OPTIONS if train_all_encoders else [args.encoder]
@@ -1540,6 +1575,7 @@ def main():
                 "weight_decay": args.weight_decay,
                 "num_workers": args.num_workers,
                 "device": args.device,
+                "max_batches": 5 if args.smoke_test else None,
             }
 
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
@@ -1582,6 +1618,7 @@ def main():
                     wandb_project=wandb_project,
                     wandb_run_name=run_name,
                     results_csv=args.results_csv,
+                    max_batches=5 if args.smoke_test else None,
                 )
             return
 
@@ -1604,6 +1641,7 @@ def main():
                 "focal_gamma": args.focal_gamma,
                 "num_workers": args.num_workers,
                 "device": args.device,
+                "max_batches": 5 if args.smoke_test else None,
             }
 
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
@@ -1649,6 +1687,7 @@ def main():
                     wandb_run_name=run_name,
                     results_csv=args.results_csv,
                     overwrite_output_dir=True,
+                    max_batches=5 if args.smoke_test else None,
                 )
             return
 
@@ -1820,6 +1859,7 @@ def main():
                 "device": args.device,
                 "early_stopping_patience": args.patience,
                 "save_every": args.save_every,
+                "max_batches": 5 if args.smoke_test else None,
             }
 
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
