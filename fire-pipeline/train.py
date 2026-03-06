@@ -1529,7 +1529,7 @@ def main():
             }
 
             fixed = {
-                "patches_dir": args.patches_dir,
+                "patches_dir": Path(args.patches_dir).resolve(),
                 "output_dir": (args.output_dir / "scratch_model" / "tune"),
                 "batch_size": args.batch_size,
                 "num_epochs": args.epochs,
@@ -1589,7 +1589,7 @@ def main():
                 "batch_size": tune.choice([8, 16, 32]),
             }
             fixed = {
-                "patches_dir": args.patches_dir,
+                "patches_dir": Path(args.patches_dir).resolve(),
                 "output_dir": (args.output_dir / "unet_scratch" / "tune"),
                 "num_classes": args.num_classes,
                 "batch_size": args.batch_size,
@@ -1686,7 +1686,7 @@ def main():
             }
 
             fixed = {
-                "patches_dir": args.patches_dir,
+                "patches_dir": Path(args.patches_dir).resolve(),
                 "output_dir": yolo_export_dir,
                 "data_yaml": data_yaml,
                 "num_epochs": args.epochs,
@@ -1798,7 +1798,7 @@ def main():
 
         for encoder in tune_encoders:
             fixed = {
-                "patches_dir": args.patches_dir,
+                "patches_dir": Path(args.patches_dir).resolve(),
                 "output_dir": (args.output_dir / f"encoder_{encoder}" / "tune"),
                 "num_classes": args.num_classes,
                 "encoder_name": encoder,
