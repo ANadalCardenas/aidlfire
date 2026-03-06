@@ -1488,6 +1488,12 @@ def main():
         choices=["seg", "scratch", "unet_scratch", "yolo"],
         help="What to tune: segmentation models (seg), CNN scratch (scratch), UNet scratch (unet_scratch), or YOLO (yolo)",
     )
+    parser.add_argument(
+        "--tune-top-k",
+        type=int,
+        default=3,
+        help="Number of best trials to re-run with W&B and CSV logging after tuning (default: 3)",
+    )
 
     args = parser.parse_args()
     train_all_encoders = args.all_encoders == "true"
@@ -1540,10 +1546,30 @@ def main():
             )
 
             results = tuner.fit()
-            best = results.get_best_result(metric="val_loss", mode="min")
 
-            print("\nBest scratch hyperparameters:", best.config)
-            print("Best scratch val_loss:", best.metrics["val_loss"])
+            # Re-run top-K best configs with W&B and CSV logging
+            top_k = sorted(results, key=lambda r: r.metrics.get("val_loss", float("inf")))[:args.tune_top_k]
+            wandb_project = args.project if args.wandb else None
+
+            for rank, result in enumerate(top_k, start=1):
+                cfg = result.config
+                run_name = f"scratch-tune-top{rank}-lr{cfg['learning_rate']:.1e}-wd{cfg['weight_decay']:.1e}-do{cfg.get('dropout', 0.3):.2f}"
+                print(f"\n[Re-run {rank}/{args.tune_top_k}] scratch best config: {cfg}")
+                train_scratch_classifier(
+                    patches_dir=args.patches_dir,
+                    output_dir=args.output_dir / "scratch_model" / f"best_{rank}",
+                    batch_size=cfg.get("batch_size", args.batch_size),
+                    num_epochs=args.epochs,
+                    learning_rate=cfg["learning_rate"],
+                    weight_decay=cfg["weight_decay"],
+                    num_workers=args.num_workers,
+                    device=args.device,
+                    dropout=cfg.get("dropout", 0.3),
+                    pos_weight=cfg.get("pos_weight", None),
+                    wandb_project=wandb_project,
+                    wandb_run_name=run_name,
+                    results_csv=args.results_csv,
+                )
             return
 
         if args.tune_target == "unet_scratch":
@@ -1584,10 +1610,33 @@ def main():
             )
 
             results = tuner.fit()
-            best = results.get_best_result(metric="fire_iou", mode="max")
 
-            print("\nBest UNet scratch hyperparameters:", best.config)
-            print("Best UNet scratch fire_iou:", best.metrics["fire_iou"])
+            # Re-run top-K best configs with W&B and CSV logging
+            top_k = sorted(results, key=lambda r: -r.metrics.get("fire_iou", 0.0))[:args.tune_top_k]
+            wandb_project = args.project if args.wandb else None
+
+            for rank, result in enumerate(top_k, start=1):
+                cfg = result.config
+                run_name = f"unet-scratch-tune-top{rank}-lr{cfg['learning_rate']:.1e}-wd{cfg['weight_decay']:.1e}-bs{cfg.get('batch_size', args.batch_size)}"
+                print(f"\n[Re-run {rank}/{args.tune_top_k}] unet_scratch best config: {cfg}")
+                train_unet_scratch_segmentation(
+                    patches_dir=args.patches_dir,
+                    output_dir=args.output_dir / "unet_scratch" / f"best_{rank}",
+                    num_classes=args.num_classes,
+                    batch_size=cfg.get("batch_size", args.batch_size),
+                    num_epochs=args.epochs,
+                    learning_rate=cfg["learning_rate"],
+                    weight_decay=cfg["weight_decay"],
+                    use_class_weights=not args.no_class_weights,
+                    use_focal_loss=args.focal_loss,
+                    focal_gamma=args.focal_gamma,
+                    num_workers=args.num_workers,
+                    device=args.device,
+                    wandb_project=wandb_project,
+                    wandb_run_name=run_name,
+                    results_csv=args.results_csv,
+                    overwrite_output_dir=True,
+                )
             return
 
         if args.tune_target == "yolo":
@@ -1654,10 +1703,67 @@ def main():
             )
 
             results = tuner.fit()
-            best = results.get_best_result(metric="map50", mode="max")
 
-            print("\nBest YOLO hyperparameters:", best.config)
-            print("Best YOLO mAP@0.5:", best.metrics["map50"])
+            # Re-run top-K best configs with W&B and CSV logging
+            from yolo_runner import train_and_validate_yolo_det7, YoloDetTrainCfg
+            top_k = sorted(results, key=lambda r: -r.metrics.get("map50", 0.0))[:args.tune_top_k]
+            wandb_project = args.project if args.wandb else None
+
+            for rank, result in enumerate(top_k, start=1):
+                cfg = result.config
+                run_name = f"yolo-tune-top{rank}-lr{cfg['lr0']:.1e}-wd{cfg['weight_decay']:.1e}-bs{cfg.get('batch', args.batch_size)}"
+                print(f"\n[Re-run {rank}/{args.tune_top_k}] yolo best config: {cfg}")
+
+                yolo_cfg = YoloDetTrainCfg(
+                    imgsz=512,
+                    batch=cfg.get("batch", args.batch_size),
+                    epochs=args.epochs,
+                    device=args.device,
+                    model_weights="yolov8n.pt",
+                    lr0=cfg["lr0"],
+                    weight_decay=cfg["weight_decay"],
+                )
+
+                wandb_run = None
+                if wandb_project:
+                    wandb_run = setup_wandb(
+                        config={**cfg, "model": "yolo", "epochs": args.epochs},
+                        project=wandb_project,
+                        run_name=run_name,
+                        wandb_dir=args.output_dir / "yolo" / f"best_{rank}",
+                    )
+
+                metrics = train_and_validate_yolo_det7(
+                    data_yaml=data_yaml,
+                    output_dir=args.output_dir / "yolo" / f"best_{rank}",
+                    cfg=yolo_cfg,
+                )
+
+                yolo_m = dict(metrics["best_metrics"])
+
+                if wandb_run:
+                    wandb_run.log({
+                        "map50": yolo_m.get("metrics/mAP50(B)", 0.0),
+                        "map50_95": yolo_m.get("metrics/mAP50-95(B)", 0.0),
+                        "precision": yolo_m.get("metrics/precision(B)", 0.0),
+                        "recall": yolo_m.get("metrics/recall(B)", 0.0),
+                        "f1": yolo_m.get("metrics/f1(B)", 0.0),
+                        "train_time_s": metrics["train_time_s"],
+                    })
+                    wandb_run.finish()
+
+                if args.results_csv is not None:
+                    append_results_csv(args.results_csv, {
+                        "model_name": "yolo",
+                        "wandb_run_name": run_name if wandb_project else "-",
+                        "MAP_50_95": yolo_m.get("metrics/mAP50-95(B)", ""),
+                        "map_50": yolo_m.get("metrics/mAP50(B)", ""),
+                        "val_precision": yolo_m.get("metrics/precision(B)", ""),
+                        "val_recall": yolo_m.get("metrics/recall(B)", ""),
+                        "f1": yolo_m.get("metrics/f1(B)", ""),
+                        "train_time_s": round(float(metrics["train_time_s"]), 2),
+                        "num_params": int(metrics["num_params"]),
+                    })
             return
 
         # Segmentation tuning
