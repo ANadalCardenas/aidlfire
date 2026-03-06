@@ -58,8 +58,16 @@ from constants import get_device, get_device_name, get_class_names
 
 try:
     from ray import tune
+    try:
+        from ray.train import RunConfig
+    except ImportError:
+        try:
+            from ray.air import RunConfig
+        except ImportError:
+            RunConfig = tune.RunConfig
 except ImportError:
     tune = None
+    RunConfig = None
 
 
 def setup_wandb(config: dict, project: str, run_name: str | None = None, wandb_dir: Path | None = None):
@@ -1540,7 +1548,7 @@ def main():
                     mode="min",
                     num_samples=args.tune_samples if args.tune_mode == "random" else 1,
                 ),
-                run_config=tune.RunConfig(
+                run_config=RunConfig(
                     name="tune_scratch",
                     local_dir=str(fixed["output_dir"]),
                 ),
@@ -1604,7 +1612,7 @@ def main():
                     mode="max",
                     num_samples=args.tune_samples if args.tune_mode == "random" else 1,
                 ),
-                run_config=tune.RunConfig(
+                run_config=RunConfig(
                     name="tune_unet_scratch",
                     local_dir=str(fixed["output_dir"]),
                 ),
@@ -1697,7 +1705,7 @@ def main():
                     mode="max",
                     num_samples=args.tune_samples if args.tune_mode == "random" else 1,
                 ),
-                run_config=tune.RunConfig(
+                run_config=RunConfig(
                     name="tune_yolo",
                     local_dir=str(yolo_export_dir),
                 ),
@@ -1825,7 +1833,7 @@ def main():
                     mode="max",
                     num_samples=args.tune_samples if args.tune_mode == "random" else 1,
                 ),
-                run_config=tune.RunConfig(
+                run_config=RunConfig(
                     name=f"tune_{encoder}",
                     local_dir=str(fixed["output_dir"]),
                 ),
