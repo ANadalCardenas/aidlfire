@@ -130,6 +130,26 @@ uv run python train_sen2fire_finetune.py \
 
 Result: a single model that outputs both **binary fire** and **severity** maps. In the app, use the "Show binary fire map" and "Show severity map" toggles to compare. History stores both maps for dual-head results.
 
+### Alternative: Combined Binary → Severity workflow
+
+For maximum geographic diversity, train binary on **CEMS + Sen2Fire combined**, then add severity on CEMS GRA only. See [docs/COMBINED_BINARY_SEVERITY_WORKFLOW.md](../docs/COMBINED_BINARY_SEVERITY_WORKFLOW.md) for details.
+
+```bash
+# Phase 1: Combined binary (CEMS DEL + Sen2Fire)
+uv run python run_pipeline.py --dataset-dir ../wildfires-cems --output-dir ./patches --mask-type DEL
+uv run python train_combined_binary.py \
+    --patches-dir ./patches \
+    --sen2fire-dir ../data-sen2fire \
+    --output-dir ./output/combined_binary
+
+# Phase 2: Severity fine-tune (CEMS GRA only)
+uv run python run_pipeline.py --dataset-dir ../wildfires-cems --output-dir ./patches_gra --mask-type GRA
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/combined_binary/checkpoints/best_model.pt \
+    --patches-dir ./patches_gra \
+    --output-dir ./output/severity_finetune
+```
+
 ### Run the Web App
 
 ```bash
