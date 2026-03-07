@@ -43,7 +43,7 @@ PHASE 3 — Top-K re-training
 
 | Model        | Metric       | Direction |
 |--------------|--------------|-----------|
-| CNN Scratch  | `val_loss`   | lower is better |
+| CNN Scratch  | `val_f1`     | higher is better |
 | UNet Scratch | `fire_iou`   | higher is better |
 | YOLO         | `mAP@0.5`    | higher is better |
 

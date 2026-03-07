@@ -488,7 +488,7 @@ def train_scratch_classifier(
             val_auc = 0.0
 
         if report_to_tune:
-            ray_report({"val_loss": val_loss, "train_loss": train_loss, "epoch": epoch})
+            ray_report({"val_loss": val_loss, "val_f1": val_f1, "train_loss": train_loss, "epoch": epoch})
 
         print(
             f"\nScratch Epoch {epoch}: "
