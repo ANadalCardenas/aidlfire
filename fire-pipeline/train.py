@@ -60,19 +60,23 @@ from constants import get_device, get_device_name, get_class_names
 try:
     from ray import tune
     try:
-        from ray.train import RunConfig, CheckpointConfig, report as ray_report
+        from ray.train import report as ray_report
     except ImportError:
         try:
-            from ray.air import RunConfig, CheckpointConfig, session
+            from ray.air import session
             ray_report = session.report
         except ImportError:
-            RunConfig = tune.RunConfig
-            CheckpointConfig = None
             ray_report = tune.report
+    try:
+        from ray.air import RunConfig
+    except ImportError:
+        try:
+            from ray.train import RunConfig
+        except ImportError:
+            RunConfig = tune.RunConfig
 except ImportError:
     tune = None
     RunConfig = None
-    CheckpointConfig = None
     ray_report = None
 
 
