@@ -1593,7 +1593,7 @@ def main():
                 run_config=RunConfig(
                     name="tune_scratch",
                     storage_path=str(Path(fixed["output_dir"]).resolve()),
-                    checkpoint_config=CheckpointConfig(num_to_keep=0) if CheckpointConfig else None,
+
                 ),
             )
 
@@ -1660,7 +1660,7 @@ def main():
                 run_config=RunConfig(
                     name="tune_unet_scratch",
                     storage_path=str(Path(fixed["output_dir"]).resolve()),
-                    checkpoint_config=CheckpointConfig(num_to_keep=0) if CheckpointConfig else None,
+
                 ),
             )
 
@@ -1755,7 +1755,7 @@ def main():
                 run_config=RunConfig(
                     name="tune_yolo",
                     storage_path=str(Path(yolo_export_dir).resolve()),
-                    checkpoint_config=CheckpointConfig(num_to_keep=0) if CheckpointConfig else None,
+
                 ),
             )
 
@@ -1885,7 +1885,7 @@ def main():
                 run_config=RunConfig(
                     name=f"tune_{encoder}",
                     storage_path=str(Path(fixed["output_dir"]).resolve()),
-                    checkpoint_config=CheckpointConfig(num_to_keep=0) if CheckpointConfig else None,
+
                 ),
             )
 
