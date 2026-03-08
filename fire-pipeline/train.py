@@ -1785,8 +1785,8 @@ def main():
 
             fixed = {
                 "patches_dir": Path(args.patches_dir).resolve(),
-                "output_dir": yolo_export_dir,
-                "data_yaml": data_yaml,
+                "output_dir": yolo_export_dir.resolve(),
+                "data_yaml": data_yaml.resolve(),
                 "num_epochs": args.epochs,
                 "batch_size": args.batch_size,
                 "imgsz": 512,
