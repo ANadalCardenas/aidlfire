@@ -1755,7 +1755,7 @@ def main():
             yolo_channels = get_patch_num_channels(args.patches_dir)
             yolo_export_dir = args.output_dir / "yolo" / "tune"
             yolo_export_dir.mkdir(parents=True, exist_ok=True)
-            data_yaml = yolo_export_dir / "yolo_det_7ch_dataset" / "data.yaml"
+            data_yaml = yolo_export_dir / "yolo_det_8ch_dataset" / "data.yaml"
 
             if not data_yaml.exists():
                 print("Exporting YOLO dataset (done once for all trials)...")

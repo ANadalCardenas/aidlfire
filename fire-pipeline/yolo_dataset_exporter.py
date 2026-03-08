@@ -240,7 +240,7 @@ def export_yolo_det7_dataset(
       dict containing metrics from yolo_runner.py
     """
     export_root = Path(export_root)
-    ds_dir = export_root / "yolo_det_7ch_dataset"
+    ds_dir = export_root / "yolo_det_8ch_dataset"
 
     # Clean old export to avoid mixing datasets
     if ds_dir.exists():
