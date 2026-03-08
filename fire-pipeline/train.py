@@ -1796,6 +1796,10 @@ def main():
                 "weight_decay": 5e-4,
             }
 
+            # Ultralytics reports its own per-epoch metrics to Ray Tune internally,
+            # which don't include our 'map50' key. Disable strict checking to allow this.
+            os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
+
             tuner = tune.Tuner(
                 tune.with_parameters(tune_yolo_trainable, fixed=fixed),
                 param_space=search_space,
