@@ -74,6 +74,11 @@ def train_and_validate_yolo_det7(
     data_yaml = Path(data_yaml)
     output_dir = Path(output_dir)
 
+    # Resolve device: Ultralytics does not accept "auto" or "mps" as a string
+    device = cfg.device
+    if device in ("auto", "mps"):
+        device = "0" if torch.cuda.is_available() else "cpu"
+
     # Load a detection model (NOT segmentation).
     model = YOLO(cfg.model_weights)
 
@@ -83,7 +88,7 @@ def train_and_validate_yolo_det7(
     # start timing
     t0 = time.perf_counter()
 
-    use_cuda = torch.cuda.is_available() and cfg.device not in ("cpu", "mps")
+    use_cuda = torch.cuda.is_available() and device not in ("cpu", "mps")
     if use_cuda:
         torch.cuda.reset_peak_memory_stats()
 
@@ -95,7 +100,7 @@ def train_and_validate_yolo_det7(
         imgsz=cfg.imgsz,
         epochs=cfg.epochs,
         batch=cfg.batch,
-        device=cfg.device,
+        device=device,
         lr0=cfg.lr0,
         weight_decay=cfg.weight_decay,
         exist_ok=True,
@@ -107,7 +112,7 @@ def train_and_validate_yolo_det7(
     val_res = model.val(
         data=str(data_yaml),
         imgsz=cfg.imgsz,
-        device=cfg.device,
+        device=device,
     )
 
     # stop timer
@@ -115,7 +120,7 @@ def train_and_validate_yolo_det7(
 
     # peak GPU memory
     peak_mem_mb = None
-    device_name = str(cfg.device)
+    device_name = str(device)
 
     if use_cuda:
         peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
