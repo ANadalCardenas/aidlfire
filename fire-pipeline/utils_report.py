@@ -19,6 +19,8 @@ ALL_CSV_COLUMNS = [
     "fire_dice", "mean_iou",
     # Training metadata
     "train_time_s", "num_params", "best_epoch",
+    # Launch command
+    "command",
 ]
 
 

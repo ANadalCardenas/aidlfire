@@ -337,6 +337,7 @@ def train_scratch_classifier(
     results_csv: Path | None = None,
     dataset: str = "1rst dataset",
     max_batches: int | None = None,
+    command: str = "",
 ):
 
     """
@@ -580,6 +581,7 @@ def train_scratch_classifier(
             "train_time_s": round(train_time_s, 2),
             "num_params": total_params,
             "best_epoch": best_epoch,
+            "command": command,
         })
 
     if wandb:
@@ -613,6 +615,7 @@ def train_unet_scratch_segmentation(
     results_csv: Path | None = None,
     dataset: str = "1rst dataset",
     max_batches: int | None = None,
+    command: str = "",
 ) -> float:
     """
     Baseline training loop for the U-Net from scratch (segmentation).
@@ -920,6 +923,7 @@ def train_unet_scratch_segmentation(
             "train_time_s": round(train_time_s, 2),
             "num_params": total_params,
             "best_epoch": best_epoch,
+            "command": command,
         })
 
     return best_metric, best_epoch
@@ -1569,6 +1573,7 @@ def main():
     )
 
     args = parser.parse_args()
+    launch_command = "python train.py " + " ".join(sys.argv[1:])
 
     if args.smoke_test:
         print("[SMOKE TEST] Overriding: epochs=1, tune_samples=2, tune_top_k=1, max_batches=5")
@@ -1664,6 +1669,7 @@ def main():
                     results_csv=args.results_csv,
                     dataset=dataset_label,
                     max_batches=5 if args.smoke_test else None,
+                    command=launch_command,
                 )
             return
 
@@ -1744,6 +1750,7 @@ def main():
                     dataset=dataset_label,
                     overwrite_output_dir=True,
                     max_batches=5 if args.smoke_test else None,
+                    command=launch_command,
                 )
             return
 
@@ -1882,6 +1889,7 @@ def main():
                         "f1": yolo_m.get("metrics/f1(B)", ""),
                         "train_time_s": round(float(metrics["train_time_s"]), 2),
                         "num_params": int(metrics["num_params"]),
+                        "command": launch_command,
                     })
             return
 
@@ -2077,6 +2085,7 @@ def main():
                 "train_time_s": round(float(metrics["train_time_s"]), 2),
                 "num_params": int(metrics["num_params"]),
                 "best_epoch": best_epoch,
+                "command": launch_command,
             })
         
 
@@ -2099,6 +2108,7 @@ def main():
             wandb_project=wandb_project,
             wandb_run_name=run_name,
             results_csv=args.results_csv,
+            command=launch_command,
         )
 
     # U-Net from scratch (segmentation) baseline
@@ -2132,6 +2142,7 @@ def main():
             save_every=args.save_every,
             overwrite_output_dir=args.overwrite_output_dir,
             results_csv=args.results_csv,
+            command=launch_command,
         )
 
 if __name__ == "__main__":
