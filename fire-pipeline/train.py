@@ -27,6 +27,10 @@ Outputs:
         <output-dir>/yolo_seg/
 """
 
+# =============================================================================
+# IMPORTS
+# =============================================================================
+
 import argparse
 import json
 import os
@@ -73,6 +77,10 @@ except ImportError:
     RunConfig = None
     ray_report = None
 
+
+# =============================================================================
+# UTILITIES
+# =============================================================================
 
 def setup_wandb(config: dict, project: str, run_name: str | None = None, wandb_dir: Path | None = None):
     """Initialize Weights & Biases logging."""
@@ -318,6 +326,10 @@ def _make_run_name(model: str, args) -> str:
         parts.append("noaug")
     return "_".join(parts)
 
+
+# =============================================================================
+# SCRATCH CLASSIFIER TRAINING
+# =============================================================================
 
 def train_scratch_classifier(
     patches_dir: Path,
@@ -588,6 +600,10 @@ def train_scratch_classifier(
         wandb.finish()
     return best_val_f1, best_epoch
 
+
+# =============================================================================
+# UNET SCRATCH SEGMENTATION TRAINING
+# =============================================================================
 
 def train_unet_scratch_segmentation(
     patches_dir: Path,
@@ -928,6 +944,10 @@ def train_unet_scratch_segmentation(
 
     return best_metric, best_epoch
 
+
+# =============================================================================
+# SMP SEGMENTATION TRAINING
+# =============================================================================
 
 def train(
     patches_dir: Path,
@@ -1289,6 +1309,10 @@ def train(
     return best_metric
 
 
+# =============================================================================
+# RAY TUNE TRAINABLES
+# =============================================================================
+
 def tune_trainable(config, fixed):
     """
     Minimal Ray Tune trainable: call existing train() once per trial
@@ -1409,6 +1433,10 @@ def tune_yolo_trainable(config, fixed):
     map50 = metrics["best_metrics"].get("metrics/mAP50(B)", 0.0)
     ray_report({"map50": map50})
 
+
+# =============================================================================
+# MAIN / ARGUMENT PARSING
+# =============================================================================
 
 def main():
     parser = argparse.ArgumentParser(
@@ -1591,7 +1619,7 @@ def main():
     # Hyperparameter tuning
     if args.tune == "true":
         if tune is None:
-            print("❌ Ray Tune not available. Install with: pip install 'ray[tune]'")
+            print("Ray Tune not available. Install with: pip install 'ray[tune]'")
             sys.exit(1)
         
         if args.tune_target == "scratch":
@@ -1641,7 +1669,7 @@ def main():
             # Re-run top-K best configs with W&B and CSV logging
             valid_results = [r for r in results if r.config is not None]
             if not valid_results:
-                print("❌ All tuning trials failed. Check error logs in the output directory.")
+                print("All tuning trials failed. Check error logs in the output directory.")
                 return
             top_k = sorted(valid_results, key=lambda r: -r.metrics.get("val_f1", 0.0))[:args.tune_top_k]
             wandb_project = args.project if args.wandb else None
@@ -1719,7 +1747,7 @@ def main():
             # Re-run top-K best configs with W&B and CSV logging
             valid_results = [r for r in results if r.config is not None]
             if not valid_results:
-                print("❌ All tuning trials failed. Check error logs in the output directory.")
+                print("All tuning trials failed. Check error logs in the output directory.")
                 return
             top_k = sorted(valid_results, key=lambda r: -r.metrics.get("fire_iou", 0.0))[:args.tune_top_k]
             wandb_project = args.project if args.wandb else None
@@ -1830,7 +1858,7 @@ def main():
             from yolo_runner import train_and_validate_yolo_det7, YoloDetTrainCfg
             valid_results = [r for r in results if r.config is not None]
             if not valid_results:
-                print("❌ All tuning trials failed. Check error logs in the output directory.")
+                print("All tuning trials failed. Check error logs in the output directory.")
                 return
             top_k = sorted(valid_results, key=lambda r: -r.metrics.get("map50", 0.0))[:args.tune_top_k]
             wandb_project = args.project if args.wandb else None
