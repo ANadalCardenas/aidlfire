@@ -350,6 +350,7 @@ class WildfireDataModule:
         target_transform: Callable | None = None,
         use_weighted_sampling: bool = False,
         fire_sample_weight: float = 5.0,
+        drop_last: bool = False,
     ):
         if not TORCH_AVAILABLE:
             raise ImportError("PyTorch is required for WildfireDataModule")
@@ -362,6 +363,7 @@ class WildfireDataModule:
         self.fire_threshold = fire_threshold
         self.use_weighted_sampling = use_weighted_sampling
         self.fire_sample_weight = fire_sample_weight
+        self.drop_last = drop_last
 
         # Handle default augmentation
         if train_augment == "default":
@@ -443,6 +445,7 @@ class WildfireDataModule:
             sampler=sampler,
             num_workers=self.num_workers,
             pin_memory=True,
+            drop_last=self.drop_last,
         )
 
     def val_dataloader(self) -> DataLoader:

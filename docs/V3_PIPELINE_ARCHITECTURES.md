@@ -317,6 +317,80 @@ uv run python train_severity_finetune.py \
 
 Phase 2 **inherits** encoder and architecture from the Phase 1 checkpoint. You do **not** pass `--encoder` or `--architecture` to `train_severity_finetune.py`; it reads them from the checkpoint config.
 
+Below are the **Phase 2 commands only** for each of the 7 Phase 1 models. Run from `fire-pipeline/` after the corresponding Phase 1 run has produced a checkpoint. Ensure each checkpoint path exists before running.
+
+### 1. ResNet34 + U-Net (Default)
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_resnet34_unet/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_resnet34_unet \
+    --epochs 30
+```
+
+### 2. ResNet50 + U-Net++ (Higher Accuracy)
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_resnet50_unetpp/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_resnet50_unetpp \
+    --epochs 30
+```
+
+### 3. EfficientNet-B1 + U-Net++
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_efficientnet-b1_unetpp/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_efficientnet-b1_unetpp \
+    --epochs 30
+```
+
+### 4. ResNet18 + U-Net (Fast)
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_resnet18_unet/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_resnet18_unet \
+    --epochs 30
+```
+
+### 5. MobileNet-V2 + U-Net (Edge)
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_mobilenet_unet/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_mobilenet_unet \
+    --epochs 30
+```
+
+### 6. EfficientNet-B2 + U-Net++ (Best Quality)
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_efficientnet-b2_unetpp/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_efficientnet-b2_unetpp \
+    --epochs 30
+```
+
+### 7. ResNet50 + DeepLabV3+
+
+```bash
+uv run python train_severity_finetune.py \
+    --checkpoint ./output/v3_combined_binary_resnet50_deeplabv3plus/checkpoints/best_model.pt \
+    --patches-dir ../patches_gra \
+    --output-dir ./output/v3_finetune_severity_resnet50_deeplabv3plus \
+    --epochs 30
+```
+
+---
+
 Each Phase 2 command above uses the matching Phase 1 checkpoint. Ensure the checkpoint path matches the Phase 1 output directory.
 
 ---

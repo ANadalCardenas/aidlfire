@@ -19,6 +19,7 @@ from pathlib import Path
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
@@ -105,6 +106,11 @@ def train_epoch(
 
         optimizer.zero_grad()
         _, severity_logits = model(images)
+        # Some architectures (e.g. DeepLabV3+) output at reduced resolution; upsample to match masks
+        if severity_logits.shape[-2:] != masks.shape[-2:]:
+            severity_logits = F.interpolate(
+                severity_logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
+            )
         result = criterion(severity_logits, masks)
         loss = result[0] if isinstance(result, tuple) else result
 
@@ -144,6 +150,10 @@ def validate_epoch(
         masks = masks.to(device)
 
         _, severity_logits = model(images)
+        if severity_logits.shape[-2:] != masks.shape[-2:]:
+            severity_logits = F.interpolate(
+                severity_logits, size=masks.shape[-2:], mode="bilinear", align_corners=False
+            )
         result = criterion(severity_logits, masks)
         loss = result[0] if isinstance(result, tuple) else result
 
@@ -229,6 +239,7 @@ def main():
         num_workers=args.num_workers,
         train_augment=get_training_augmentation(),
         fire_augment=fire_augment,
+        drop_last=True,
     )
 
     train_loader = data_module.train_dataloader()
