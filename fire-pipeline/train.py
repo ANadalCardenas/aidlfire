@@ -1600,6 +1600,20 @@ def main():
         help="Run a tiny smoke test: 1 epoch, 2 tune trials, top-1 rerun, 5 batches per epoch",
     )
 
+    # YOLO-specific arguments
+    parser.add_argument(
+        "--yolo-imgsz",
+        type=int,
+        default=512,
+        help="Image size for YOLO training (default: 512; use 256 to reduce memory on low-RAM machines)",
+    )
+    parser.add_argument(
+        "--yolo-batch",
+        type=int,
+        default=None,
+        help="Batch size override for YOLO (default: same as --batch-size; use smaller value to reduce memory)",
+    )
+
     args = parser.parse_args()
     launch_command = "python train.py " + " ".join(sys.argv[1:])
 
@@ -1812,8 +1826,8 @@ def main():
                         min_box_area_px=10,
                     ),
                     train_cfg=YoloDetTrainCfg(
-                        imgsz=512,
-                        batch=args.batch_size,
+                        imgsz=args.yolo_imgsz,
+                        batch=args.yolo_batch or args.batch_size,
                         epochs=1,  # dummy run just to trigger export
                         device=args.device,
                     ),
@@ -1821,10 +1835,11 @@ def main():
                     sen2fire_dir=args.sen2fire_dir,
                 )
 
+            yolo_batch_size = args.yolo_batch or args.batch_size
             search_space = {
                 "lr0": tune.loguniform(5e-4, 1e-2),
                 "weight_decay": tune.loguniform(1e-4, 1e-2),
-                "batch": tune.choice([8, 16]),
+                "batch": tune.choice([max(4, yolo_batch_size // 2), yolo_batch_size]),
             }
 
             fixed = {
@@ -1832,8 +1847,8 @@ def main():
                 "output_dir": yolo_export_dir.resolve(),
                 "data_yaml": data_yaml.resolve(),
                 "num_epochs": args.epochs,
-                "batch_size": args.batch_size,
-                "imgsz": 512,
+                "batch_size": yolo_batch_size,
+                "imgsz": args.yolo_imgsz,
                 "device": args.device,
                 "model_weights": "yolov8n.pt",
                 "lr0": 1e-2,
@@ -1880,8 +1895,8 @@ def main():
                 print(f"\n[Re-run {rank}/{args.tune_top_k}] yolo best config: {cfg}")
 
                 yolo_cfg = YoloDetTrainCfg(
-                    imgsz=512,
-                    batch=cfg.get("batch", args.batch_size),
+                    imgsz=args.yolo_imgsz,
+                    batch=cfg.get("batch", yolo_batch_size),
                     epochs=args.epochs,
                     device=args.device,
                     model_weights="yolov8n.pt",
@@ -2093,8 +2108,8 @@ def main():
                 min_box_area_px=10,
             ),
             train_cfg=YoloDetTrainCfg(
-                imgsz=512,
-                batch=args.batch_size,
+                imgsz=args.yolo_imgsz,
+                batch=args.yolo_batch or args.batch_size,
                 epochs=args.epochs,
                 device=args.device,
                 model_weights="yolov8n.pt",
