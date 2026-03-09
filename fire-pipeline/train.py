@@ -1649,7 +1649,10 @@ def main():
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
 
             tuner = tune.Tuner(
-                tune.with_parameters(tune_scratch_trainable, fixed=fixed),
+                tune.with_resources(
+                    tune.with_parameters(tune_scratch_trainable, fixed=fixed),
+                    resources={"gpu": 1, "cpu": 4},
+                ),
                 param_space=search_space,
                 tune_config=tune.TuneConfig(
                     metric="val_f1",
@@ -1729,7 +1732,10 @@ def main():
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
 
             tuner = tune.Tuner(
-                tune.with_parameters(tune_unet_scratch_trainable, fixed=fixed),
+                tune.with_resources(
+                    tune.with_parameters(tune_unet_scratch_trainable, fixed=fixed),
+                    resources={"gpu": 1, "cpu": 4},
+                ),
                 param_space=search_space,
                 tune_config=tune.TuneConfig(
                     metric="fire_iou",
@@ -1839,7 +1845,10 @@ def main():
             os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
 
             tuner = tune.Tuner(
-                tune.with_parameters(tune_yolo_trainable, fixed=fixed),
+                tune.with_resources(
+                    tune.with_parameters(tune_yolo_trainable, fixed=fixed),
+                    resources={"gpu": 1, "cpu": 4},
+                ),
                 param_space=search_space,
                 tune_config=tune.TuneConfig(
                     metric="map50",
@@ -1975,7 +1984,10 @@ def main():
             print(f"{'#' * 80}\n")
 
             tuner = tune.Tuner(
-                tune.with_parameters(tune_trainable, fixed=fixed),
+                tune.with_resources(
+                    tune.with_parameters(tune_trainable, fixed=fixed),
+                    resources={"gpu": 1, "cpu": 4},
+                ),
                 param_space=search_space,
                 tune_config=tune.TuneConfig(
                     metric="fire_iou",
