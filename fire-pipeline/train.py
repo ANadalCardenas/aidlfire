@@ -1655,7 +1655,7 @@ def main():
                     metric="val_f1",
                     mode="max",
                     num_samples=args.tune_samples if args.tune_mode == "random" else 1,
-                    max_concurrent_trials=4,
+                    max_concurrent_trials=1,
                 ),
                 run_config=RunConfig(
                     name="tune_scratch",
@@ -1733,7 +1733,7 @@ def main():
                     metric="fire_iou",
                     mode="max",
                     num_samples=args.tune_samples if args.tune_mode == "random" else 1,
-                    max_concurrent_trials=4,
+                    max_concurrent_trials=1,
                 ),
                 run_config=RunConfig(
                     name="tune_unet_scratch",
