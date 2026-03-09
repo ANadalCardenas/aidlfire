@@ -1702,10 +1702,12 @@ def main():
             return
 
         if args.tune_target == "unet_scratch":
+            # Search space narrowed based on best configs from 1rst dataset tuning:
+            # best lr: 1.2e-4 to 2.4e-4, best batch: 16 or 32, weight_decay low to moderate
             search_space = {
-                "learning_rate": tune.loguniform(5e-5, 5e-4),
-                "weight_decay": tune.loguniform(1e-6, 1e-3),
-                "batch_size": tune.choice([8, 16, 32]),
+                "learning_rate": tune.loguniform(1e-4, 3e-4),
+                "weight_decay": tune.loguniform(1e-5, 3e-4),
+                "batch_size": tune.choice([16, 32]),
             }
             fixed = {
                 "patches_dir": Path(args.patches_dir).resolve(),
