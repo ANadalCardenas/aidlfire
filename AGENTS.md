@@ -30,7 +30,6 @@ CEMS-Wildfire-Dataset-main/
 │   ├── analyze_patches.py      # Class imbalance analysis
 │   ├── download_dataset.py     # Download from HuggingFace
 │   ├── remove_catalan_data.py  # Regional data separation
-│   ├── CLAUDE.md               # Detailed technical context
 │   ├── PATCHES.md              # Patch format documentation
 │   └── README.md               # Usage instructions
 │
@@ -162,7 +161,7 @@ See `docs/COMBINED_BINARY_SEVERITY_WORKFLOW.md` for full details.
 
 | If you need... | Look at... |
 |----------------|------------|
-| Technical specs | `fire-pipeline/CLAUDE.md` |
+| Technical specs | `fire-pipeline/PATCHES.md` |
 | Beginner explanations | `AIDL_PROJECT_GUIDE.md` |
 | Data file formats | `DATA_REFERENCE.md` |
 | Patch details | `fire-pipeline/PATCHES.md` |

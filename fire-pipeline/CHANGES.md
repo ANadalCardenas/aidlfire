@@ -34,6 +34,5 @@
 
 - **README.md**: Input channels and vegetation (NDVI) section, run_pipeline options, checkpoint config table, Stage 2/4 and inference notes.
 - **PATCHES.md**: “The 8th channel (NDVI)” section, 7 or 8 channels in file structure and examples, pipeline options and steps.
-- **CLAUDE.md**: Band table + NDVI, patch shape 7 or 8, generate-patches note, dataset shape.
 - **AGENTS.md**: Input data (NDVI, constants), patches (7 or 8 channels), generate-patches task, important numbers, warnings.
 - **docs/SEN2FIRE_INTEGRATION_PLAN.md**: Note that CEMS uses 8 channels by default; Sen2Fire integration should use same 8-channel spec.
