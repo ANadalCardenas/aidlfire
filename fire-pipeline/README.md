@@ -19,6 +19,7 @@ A data processing pipeline for the CEMS Wildfire Dataset, designed to prepare Se
 - [Class Imbalance Analysis](#class-imbalance-analysis)
 - [Data Augmentation](#data-augmentation)
 - [Model Training](#model-training)
+- [Exporting W&B Runs](#exporting-wb-runs)
 - [Inference Pipeline](#inference-pipeline)
 - [Streamlit Web App](#streamlit-web-app)
 - [Visualization Tools](#visualization-tools)
@@ -235,6 +236,7 @@ Raw Sentinel-2 GeoTIFFs     →     256×256 Patches     →     PyTorch DataLoa
 | `model.py` | U-Net segmentation model with loss functions |
 | `metrics.py` | Evaluation metrics for segmentation and detection |
 | `train.py` | Training script with checkpointing and W&B logging |
+| `export_wandb_runs.py` | Export W&B runs to CSV/JSON for local analysis |
 | `visualize.py` | Tools for visualizing patches and source images |
 | `remove_catalan_data.py` | Move Catalan fire data to separate folder for regional testing |
 | `inference.py` | Inference pipeline for running trained models |
@@ -1128,6 +1130,29 @@ Key options:
   --wandb                 Enable W&B logging
   --resume PATH           Resume from checkpoint
 ```
+
+### Exporting W&B Runs
+
+Export all training runs from Weights & Biases to CSV/JSON for local analysis:
+
+```bash
+# Export summary metrics and config to CSV (default: wandb_runs_export.csv)
+uv run python export_wandb_runs.py
+
+# Custom output path
+uv run python export_wandb_runs.py -o ./wandb_export.csv
+
+# Also export full JSON
+uv run python export_wandb_runs.py --json ./wandb_runs.json
+
+# Export per-step history (loss, metrics per epoch) to separate CSVs
+uv run python export_wandb_runs.py --history --history-dir ./wandb_history
+
+# Specify entity if project is under a team
+uv run python export_wandb_runs.py --entity your-team --project fire-detection
+```
+
+Requires `wandb login` (or `WANDB_API_KEY`). Output includes `run_id`, `run_name`, summary metrics (e.g. `val_loss`, `fire_dice`), and config (e.g. `config.lr`, `config.batch_size`).
 
 ### Using the Trained Model
 
