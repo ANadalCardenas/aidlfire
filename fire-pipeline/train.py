@@ -34,6 +34,7 @@ Outputs:
 import argparse
 import json
 import os
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -1716,6 +1717,14 @@ def main():
                     max_batches=5 if args.smoke_test else None,
                     command=launch_command,
                 )
+                if rank == 1:
+                    ckpt_dir = Path(__file__).parent / "checkpoints"
+                    ckpt_dir.mkdir(exist_ok=True)
+                    src = args.output_dir / "scratch_model" / "best_1" / "checkpoints" / "best_model.pt"
+                    dst = ckpt_dir / "cnn_scratch_best.pt"
+                    if src.exists():
+                        shutil.copy2(src, dst)
+                        print(f"Best CNN scratch checkpoint saved to {dst}")
             return
 
         if args.tune_target == "unet_scratch":
@@ -1802,6 +1811,14 @@ def main():
                     max_batches=5 if args.smoke_test else None,
                     command=launch_command,
                 )
+                if rank == 1:
+                    ckpt_dir = Path(__file__).parent / "checkpoints"
+                    ckpt_dir.mkdir(exist_ok=True)
+                    src = args.output_dir / "unet_scratch" / "best_1" / "checkpoints" / "best_model.pt"
+                    dst = ckpt_dir / "unet_scratch_best.pt"
+                    if src.exists():
+                        shutil.copy2(src, dst)
+                        print(f"Best UNet scratch checkpoint saved to {dst}")
             return
 
         if args.tune_target == "yolo":
@@ -1945,6 +1962,14 @@ def main():
                         "num_params": int(metrics["num_params"]),
                         "command": launch_command,
                     })
+                if rank == 1:
+                    ckpt_dir = Path(__file__).parent / "checkpoints"
+                    ckpt_dir.mkdir(exist_ok=True)
+                    src = Path(metrics["best_checkpoint"])
+                    dst = ckpt_dir / "yolo_best.pt"
+                    if src.exists():
+                        shutil.copy2(src, dst)
+                        print(f"Best YOLO checkpoint saved to {dst}")
             return
 
         # Segmentation tuning
