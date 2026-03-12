@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import streamlit as st
+import torch
 
 # Page config must be first Streamlit command
 st.set_page_config(
@@ -45,6 +46,7 @@ from inference import (
     create_visualization_from_segmentation,
     create_fire_mask_visualization,
 )
+from inference_unet_scratch import UNetScratchInferencePipeline
 
 
 # Configuration (can be set via environment variables)
@@ -134,12 +136,30 @@ def get_storage():
     return StorageManager(STORAGE_DIR)
 
 
+def _is_unet_scratch_checkpoint(model_path: Path) -> bool:
+    """Detect if checkpoint is from UNetScratch (different architecture than SMP-based models)."""
+    try:
+        checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
+        config = checkpoint.get("config", {})
+        if config.get("model") == "UNetScratch":
+            return True
+        # Fallback: check state_dict keys (encoder.encBlocks vs model.encoder.layer1)
+        state = checkpoint.get("model_state_dict", {})
+        if state and "encoder.encBlocks.0.conv1.weight" in state:
+            return True
+    except Exception:
+        pass
+    return False
+
+
 @st.cache_resource
 def get_model(model_path: Path):
     """Load the fire detection model from the given path."""
-    if model_path.exists():
-        return FireInferencePipeline(model_path)
-    return None
+    if not model_path.exists():
+        return None
+    if _is_unet_scratch_checkpoint(model_path):
+        return UNetScratchInferencePipeline(model_path)
+    return FireInferencePipeline(model_path)
 
 
 def _get_available_models() -> list[str]:
@@ -422,6 +442,10 @@ def main():
     # Initialize session state for navigation
     if "page" not in st.session_state:
         st.session_state.page = "New Analysis"
+
+    # Apply pending model select (from Load parameters) before model widget is rendered
+    if "_pending_model_select" in st.session_state:
+        st.session_state.model_select = st.session_state.pop("_pending_model_select")
 
     # Sidebar
     with st.sidebar:
@@ -708,13 +732,19 @@ def _render_analysis_filters() -> None:
         pass
 
     st.markdown("---")
+    # Use loaded params for date range when available
+    default_end = st.session_state.get("analysis_end_date", datetime.now().date())
+    default_days = st.session_state.get("analysis_days_back", 30)
+    if "load_params_source" in st.session_state:
+        st.info(f"Parameters loaded from **{st.session_state.load_params_source}**. Modify as needed and click Fetch & Analyze.")
     st.caption("Date range")
     end_date = st.date_input(
         "End Date",
-        value=datetime.now().date(),
+        value=min(default_end, datetime.now().date()),
         max_value=datetime.now().date(),
+        key="analysis_end_date",
     )
-    days_back = st.slider("Days to search", min_value=1, max_value=60, value=30)
+    days_back = st.slider("Days to search", min_value=1, max_value=60, value=default_days, key="analysis_days_back")
     start_date = end_date - timedelta(days=days_back)
     st.caption(f"Search interval: **{start_date}** → **{end_date}** ({days_back} days)")
     max_cloud = st.slider("Max Cloud (%)", min_value=5, max_value=50, value=20)
@@ -726,6 +756,7 @@ def _render_analysis_filters() -> None:
             date_range=(start_date.strftime("%Y-%m-%d"), end_date.strftime("%Y-%m-%d")),
             max_cloud_cover=max_cloud,
         ):
+            st.session_state.pop("load_params_source", None)  # Clear loaded-params indicator
             st.rerun()
 
 
@@ -791,13 +822,22 @@ def run_analysis(
         fire_mask = result.segmentation > 0
         visualization[fire_mask] = [255, 0, 0]  # Red overlay for fire
 
+    # Derive model name for metadata (folder name when using MODELS_DIR, else "default")
+    if model is None:
+        model_name = "mock"
+    elif MODELS_DIR and MODELS_DIR.exists() and str(effective_path.resolve()).startswith(str(MODELS_DIR.resolve())):
+        model_name = effective_path.relative_to(MODELS_DIR).parts[0]
+    else:
+        model_name = st.session_state.get("model_select", "default") if _get_available_models() else effective_path.stem
+
     # Save to storage
     with st.spinner("Saving analysis..."):
+        metadata = {"bbox": list(bbox), "date_range": list(date_range), "model_name": model_name}
         analysis_id = storage.save_analysis(
             satellite_image=image,
             inference_result=result,
             visualization=visualization,
-            metadata={"bbox": list(bbox), "date_range": list(date_range)},
+            metadata=metadata,
         )
 
     # Store in session state for rendering in main area
@@ -806,8 +846,44 @@ def run_analysis(
         "result": result,
         "visualization": visualization,
         "analysis_id": analysis_id,
+        "model_name": model_name,
     }
     return True
+
+
+def _apply_load_params(load_params: dict, scene_id: str) -> None:
+    """Apply loaded analysis parameters to session state and switch to New Analysis."""
+    bbox = load_params.get("bbox")
+    date_range = load_params.get("date_range")
+    model_name = load_params.get("model_name")
+
+    if bbox:
+        west, south, east, north = bbox
+        st.session_state.analysis_bbox = bbox
+        st.session_state.drawn_bbox = bbox
+        st.session_state.analysis_center = ((south + north) / 2, (west + east) / 2)
+
+    if date_range and len(date_range) >= 2:
+        try:
+            start_d = datetime.strptime(date_range[0], "%Y-%m-%d").date()
+            end_d = datetime.strptime(date_range[1], "%Y-%m-%d").date()
+            days_back = max(1, (end_d - start_d).days)
+            st.session_state.analysis_end_date = min(end_d, datetime.now().date())
+            st.session_state.analysis_days_back = min(60, max(1, days_back))
+        except (ValueError, TypeError):
+            pass
+
+    if model_name:
+        available = _get_available_models()
+        if model_name in available:
+            # Defer to next run: cannot set widget key after widget is instantiated
+            st.session_state["_pending_model_select"] = model_name
+
+    st.session_state.load_params_source = scene_id
+    st.session_state.page = "New Analysis"
+    if "view_analysis" in st.session_state:
+        del st.session_state["view_analysis"]
+    st.rerun()
 
 
 def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
@@ -826,8 +902,6 @@ def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
     severity_probabilities = analysis.get("severity_probabilities")
 
     if not all([record, image_arr is not None, segmentation is not None]):
-        return None
-    if visualization is None and not (record.metadata and record.metadata.get("dual_head")):
         return None
 
     # Build SatelliteImage for display (crs not stored, use placeholder)
@@ -878,17 +952,35 @@ def _loaded_analysis_to_display_data(analysis: dict) -> dict | None:
         severity_probabilities=severity_probabilities if dual_head else None,
     )
 
-    # If no saved visualization but dual_head with maps, we'll render from result in render_analysis_results
-    if visualization is None and dual_head:
-        visualization = create_visualization_from_segmentation(
-            image_arr, result.binary_segmentation if result.binary_segmentation is not None else segmentation, 2, alpha=0.5
-        )
+    # Create fallback visualization when missing (e.g. file not found, older saves)
+    if visualization is None:
+        if dual_head and (result.binary_segmentation is not None or segmentation is not None):
+            seg_for_vis = result.binary_segmentation if result.binary_segmentation is not None else segmentation
+            visualization = create_visualization_from_segmentation(
+                image_arr, seg_for_vis, 2, alpha=0.5
+            )
+        else:
+            visualization = create_visualization_from_segmentation(
+                image_arr, segmentation, record.num_classes, alpha=0.5
+            )
+
+    model_name = (record.metadata or {}).get("model_name") if record.metadata else None
+    date_range = (record.metadata or {}).get("date_range") if record.metadata else None
+
+    # Params for "Load parameters" (bbox, date_range, model_name)
+    load_params = {
+        "bbox": record.bbox,
+        "date_range": date_range,
+        "model_name": model_name,
+    }
 
     return {
         "image": image,
         "result": result,
         "visualization": visualization,
         "analysis_id": record.id,
+        "model_name": model_name,
+        "load_params": load_params,
     }
 
 
@@ -896,13 +988,14 @@ def render_analysis_results(data: dict, from_history: bool = False) -> None:
     """Render analysis results in the main content area.
 
     Args:
-        data: Dict with image, result, visualization, analysis_id
+        data: Dict with image, result, visualization, analysis_id, and optional model_name
         from_history: If True, show Close/Delete buttons instead of "Analysis saved!"
     """
     image = data["image"]
     result = data["result"]
     visualization = data["visualization"]
     analysis_id = data["analysis_id"]
+    model_name = data.get("model_name")
 
     st.markdown("---")
     acq_date = image.datetime.strftime("%Y-%m-%d") if image.datetime else "Unknown"
@@ -914,7 +1007,7 @@ def render_analysis_results(data: dict, from_history: bool = False) -> None:
     gsd_m = 10
     ground_km_ew = w * gsd_m / 1000  # E-W extent (cols)
     ground_km_ns = h * gsd_m / 1000  # N-S extent (rows)
-    col1, col2, col3, col4 = st.columns(4)
+    col1, col2, col3, col4, col5 = st.columns(5)
     with col1:
         st.metric("Acquisition date", acq_date, help="Date the satellite captured this image (verify it's post-fire)")
     with col2:
@@ -923,6 +1016,8 @@ def render_analysis_results(data: dict, from_history: bool = False) -> None:
         st.metric("Resolution", f"{w}×{h} px (W×H)")
     with col4:
         st.metric("Ground coverage", f"~{ground_km_ew:.1f}×{ground_km_ns:.1f} km (E-W×N-S)")
+    with col5:
+        st.metric("Model", model_name or "—", help="Model used for this analysis (older analyses may not have this)")
 
     with st.expander("ℹ️ About this analysis"):
         st.markdown("""
@@ -990,7 +1085,7 @@ def render_analysis_results(data: dict, from_history: bool = False) -> None:
 
     if from_history:
         st.markdown("---")
-        col1, col2, _ = st.columns([1, 1, 4])
+        col1, col2, col3, _ = st.columns([1, 1, 1, 3])
         with col1:
             if st.button("Delete Analysis", type="secondary"):
                 get_storage().delete_analysis(analysis_id)
@@ -1002,6 +1097,10 @@ def render_analysis_results(data: dict, from_history: bool = False) -> None:
                 if "view_analysis" in st.session_state:
                     del st.session_state["view_analysis"]
                 st.rerun()
+        with col3:
+            load_params = data.get("load_params")
+            if load_params and st.button("📥 Load parameters", help="Use this analysis's area, date range, and model for a new analysis"):
+                _apply_load_params(load_params, image.scene_id)
     else:
         st.success(f"Analysis saved! ID: {analysis_id}")
 
@@ -1011,6 +1110,28 @@ def render_history():
     st.header("Analysis History")
 
     storage = get_storage()
+
+    # View selected analysis FIRST (at top) so it's visible without scrolling
+    if "view_analysis" in st.session_state:
+        analysis_id = st.session_state["view_analysis"]
+        analysis = storage.load_analysis(analysis_id)
+
+        if analysis:
+            display_data = _loaded_analysis_to_display_data(analysis)
+            if display_data:
+                st.subheader("📋 Viewing analysis")
+                render_analysis_results(display_data, from_history=True)
+                st.markdown("---")
+            else:
+                st.error("Could not load analysis data. Some files may be missing.")
+                if st.button("Close", key="close_view_error"):
+                    del st.session_state["view_analysis"]
+                    st.rerun()
+        else:
+            st.error("Analysis not found.")
+            if st.button("Close", key="close_view_notfound"):
+                del st.session_state["view_analysis"]
+                st.rerun()
 
     # Filters
     with st.expander("Filters", expanded=True):
@@ -1072,23 +1193,9 @@ def render_history():
             with col5:
                 if st.button("View", key=f"view_{record.id}"):
                     st.session_state["view_analysis"] = record.id
+                    st.rerun()
 
             st.markdown("---")
-
-    # View selected analysis - reuse same view as New Analysis
-    if "view_analysis" in st.session_state:
-        analysis_id = st.session_state["view_analysis"]
-        analysis = storage.load_analysis(analysis_id)
-
-        if analysis:
-            display_data = _loaded_analysis_to_display_data(analysis)
-            if display_data:
-                render_analysis_results(display_data, from_history=True)
-            else:
-                st.error("Could not load analysis data. Some files may be missing.")
-                if st.button("Close"):
-                    del st.session_state["view_analysis"]
-                    st.rerun()
 
 
 def render_statistics():

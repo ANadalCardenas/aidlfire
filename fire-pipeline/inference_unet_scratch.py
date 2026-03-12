@@ -45,14 +45,23 @@ class UNetScratchInferencePipeline(FireInferencePipeline):
         """Load UNet from checkpoint."""
         checkpoint = torch.load(model_path, map_location="cpu", weights_only=False)
         config = checkpoint.get("config", {})
-        in_channels = config.get("in_channels", 8)
+        state_dict = checkpoint["model_state_dict"]
+
+        # Infer in_channels from checkpoint (config may be wrong, e.g. hardcoded 7 vs actual 8)
+        first_conv_key = "encoder.encBlocks.0.conv1.weight"
+        if first_conv_key in state_dict:
+            in_channels = int(state_dict[first_conv_key].shape[1])
+        else:
+            in_channels = config.get("in_channels", 8)
+
         num_classes = config.get("num_classes", 2)
 
         model = UNet(in_channels=in_channels, num_classes=num_classes, retainDim=True)
-        model.load_state_dict(checkpoint["model_state_dict"])
+        model.load_state_dict(state_dict)
         model = model.to(self.device)
         model.eval()
 
+        config["in_channels"] = in_channels  # Ensure preprocessing uses correct channel count
         config["dual_head"] = False
         return model, config
 
