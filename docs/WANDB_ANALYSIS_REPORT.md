@@ -4,7 +4,7 @@ Analysis of experimental runs for postgrad project defense.
 
 ## Executive Summary
 
-We evaluated **59 training runs** (46 finished) across wildfire detection and severity segmentation. **ResNet50 + U-Net++** is the best model, achieving **fire IoU 0.78** for binary detection and **mean IoU 0.34** for 5-class severity. Results support our V3 pipeline assumptions: pretrained encoders outperform scratch models, 8-channel multispectral input (7 bands + NDVI) outperforms RGB-only (YOLO mAP 0.44), and combined CEMS+Sen2Fire training yields strong generalization. **Recommendation:** Deploy **resnet50_unetplusplus** for best accuracy, or **resnet34_unet** for a balance of speed and performance.
+We evaluated **59 training runs** (46 finished) across wildfire detection and severity segmentation. **ResNet50 + U-Net++** is the best model, achieving **fire IoU 0.78** for binary detection and **mean IoU 0.34** for 5-class severity. Results support our V3 pipeline assumptions: pretrained encoders outperform scratch models, pixel-wise segmentation outperforms detection-style pipeline (YOLO mAP50-95 0.44), and combined CEMS+Sen2Fire training yields strong generalization. **Recommendation:** Deploy **resnet50_unetplusplus** for best accuracy, or **resnet34_unet** for a balance of speed and performance.
 
 ---
 
@@ -17,7 +17,7 @@ We evaluated **59 training runs** (46 finished) across wildfire detection and se
 | unet_scratch | 6 | U-Net from scratch (no pretrained encoder) |
 | v3_binary | 8 | Phase 1: Combined binary (CEMS DEL + Sen2Fire) |
 | v3_severity | 14 | Phase 2: Severity fine-tune on CEMS GRA |
-| yolo | 3 | YOLOv8-Seg baseline (RGB, detection-style) |
+| yolo | 3 | YOLOv8-Seg baseline (8-channel, detection-style) |
 
 **Total runs:** 59 | **Finished:** 46
 
@@ -64,20 +64,33 @@ Phase 2 fine-tunes severity head on CEMS GRA (5 classes).
 
 ## 4. Scratch Models (No Pretrained Encoder)
 
-| Rank | Model | Fire Dice | Mean IoU | Val F1 | Run |
-|------|-------|-----------|----------|-------|-----|
-| 1 | unet_scratch | 0.8993 | 0.8909 | 0.0000 | [unet_scratch_e15_bs16_lr1e-3_wd1e-3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/7lc0krfi) |
-| 2 | unet_scratch | 0.8931 | 0.8854 | 0.0000 | [unet_scratch_e15_bs16_lr3e-4_wd1e-3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/es1tvafz) |
-| 3 | unet_scratch | 0.8384 | 0.8400 | 0.0000 | [unet-scratch+s2f-tune-top3-lr1.2e-04-wd2](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/s89w94t8) |
-| 4 | unet_scratch | 0.8356 | 0.8366 | 0.0000 | [unet-scratch+s2f-tune-top1-lr1.8e-04-wd9](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/b0uf46zb) |
-| 5 | unet_scratch | 0.7858 | 0.7906 | 0.0000 | [unet-scratch+s2f-tune-top2-lr2.8e-04-wd3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/rmxkcwtd) |
-| 6 | cnn_scratch | 0.0000 | 0.0000 | 0.6593 | [cnn_scratch_e15_bs16_lr3e-4_wd1e-3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/bgun9efn) |
-| 7 | cnn_scratch | 0.0000 | 0.0000 | 0.6527 | [cnn_scratch_e15_bs16_lr1e-3_wd1e-3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/edqzk970) |
-| 8 | cnn_scratch | 0.0000 | 0.0000 | 0.6077 | [scratch-tune-top2-lr1.2e-04-wd3.7e-06-do](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/wr692dpd) |
+Both models were trained on CEMS-only (DEL) and CEMS+Sen2Fire (DEL). All models use 8-channel input (7 bands + NDVI).
+
+### U-Net Scratch (pixel-wise segmentation, metric: Fire IoU / Fire Dice)
+
+| Rank | Dataset | Fire IoU | Fire Dice | Mean IoU | Run |
+|------|---------|----------|-----------|----------|-----|
+| 1 | CEMS | 0.8089 | 0.8944 | 0.8856 | [unet_scratch_e15_bs16_lr1e-3_wd1e-3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/7lc0krfi) |
+| 2 | CEMS | 0.8084 | 0.8940 | 0.8855 | [unet_scratch_e15_bs16_lr3e-4_wd1e-3](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/es1tvafz) |
+| 3 | CEMS | 0.8059 | 0.8925 | 0.8844 | - |
+| 4 | CEMS+S2F | 0.7453 | 0.8541 | 0.8527 | [unet-scratch+s2f-tune-top3-lr1.2e-04-wd2.2e-05-bs32](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/s89w94t8) |
+| 5 | CEMS+S2F | 0.7430 | 0.8526 | 0.8518 | [unet-scratch+s2f-tune-top1-lr1.8e-04-wd9.7e-05-bs32](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/b0uf46zb) |
+| 6 | CEMS+S2F | 0.7188 | 0.8364 | 0.8362 | [unet-scratch+s2f-tune-top2-lr2.8e-04-wd3.0e-05-bs32](https://wandb.ai/adrian-corvin-salceanu-upc-barcelona/fire-detection/runs/rmxkcwtd) |
+
+### CNN Scratch (patch-level classifier, metric: Val F1)
+
+| Rank | Dataset | Val F1 | Val Precision | Val Recall | Val AUC |
+|------|---------|--------|--------------|------------|---------|
+| 1 | CEMS | 0.6195 | 0.6531 | 0.6303 | 0.9098 |
+| 2 | CEMS | 0.6114 | 0.3467 | 0.7347 | 0.9325 |
+| 3 | CEMS | 0.6077 | 0.5259 | 0.6018 | 0.8959 |
+| 4 | CEMS+S2F | 0.6016 | 0.3600 | 0.6345 | 0.9446 |
+| 5 | CEMS+S2F | 0.5779 | 0.3401 | 0.6430 | 0.9405 |
+| 6 | CEMS+S2F | 0.5492 | 0.3922 | 0.5805 | 0.9283 |
 
 ## 5. YOLO Baseline
 
-YOLOv8-Seg (RGB detection-style). Different metric (mAP50-95).
+YOLOv8-Seg (8-channel, detection-style). All runs trained on CEMS+Sen2Fire (DEL). Different metric (mAP50-95).
 
 | Rank | mAP50-95 | F1 | Precision | Recall | Run |
 |------|----------|-----|-----------|--------|-----|
@@ -132,9 +145,9 @@ From `docs/V3_PIPELINE_ARCHITECTURES.md`:
 
 **Recommended for app:** Use **resnet50_unetplusplus** if compute allows; otherwise **resnet34_unet** for a good balance of speed and accuracy.
 
-**Why not YOLO?** YOLO uses RGB-only; lower mAP50-95 (~0.44) than SMP segmentation (fire_iou ~0.78). SMP uses 8-channel (7 bands + NDVI) for better spectral discrimination.
+**Why not YOLO?** YOLO uses a detection-style pipeline (bounding boxes) rather than pixel-wise segmentation, achieving lower mAP50-95 (~0.44) vs SMP fire IoU ~0.78. Both use 8-channel input (7 bands + NDVI); the gap is due to the task formulation, not input channels.
 
-**Why not scratch?** Scratch models (UNetScratch) can reach high fire_dice on CEMS-only, but CEMS+Sen2Fire combined training with pretrained SMP yields better generalization; pretrained encoders provide strong spectral feature extraction.
+**Why not scratch?** U-Net scratch reaches high fire_dice (~0.89) on CEMS-only and ~0.85 on CEMS+Sen2Fire (DEL), but pretrained SMP on CEMS+Sen2Fire achieves better generalization (fire IoU 0.78); pretrained encoders provide strong spectral and spatial feature extraction.
 
 ## 8. Additional Slices for Report
 
@@ -173,9 +186,9 @@ Our experiments evaluated **46 finished runs** across multiple model families: V
 
 **Severity segmentation (Phase 2):** Mean IoU of **0.34** and fire IoU of **0.41** are **in line with expectations** for 5-class severity grading. Severity mapping is harder than binary detection because: (1) classes are fine-grained (negligible vs moderate vs high damage), (2) the "no damage" class dominates, and (3) expert annotations can disagree on boundaries. In multi-class remote sensing (e.g. land cover with 7–15 classes), mean IoU of 0.3–0.5 is common; our result fits this range. The fire IoU (0.41) shows that burned-area segmentation remains solid even when the model must distinguish severity subclasses.
 
-**YOLO baseline:** mAP50-95 of **0.44** is lower than SMP segmentation (fire IoU ~0.78). YOLO uses RGB-only input and a detection-style pipeline; SMP uses 8-channel multispectral data and pixel-wise segmentation. This supports the choice of spectral bands and NDVI for wildfire tasks.
+**YOLO baseline:** mAP50-95 of **0.44** is lower than SMP segmentation (fire IoU ~0.78). Both YOLO and SMP use 8-channel input (7 bands + NDVI); the difference lies in the task formulation — YOLO uses a detection-style pipeline (bounding boxes) while SMP performs pixel-wise segmentation. This confirms that pixel-wise segmentation is better suited for burned area mapping.
 
-**Scratch vs pretrained:** UNetScratch reaches fire dice ~0.89 on CEMS-only, but on CEMS+Sen2Fire combined training, pretrained SMP (resnet50_unetplusplus) achieves better generalization. Pretrained encoders provide useful spectral and spatial features for satellite imagery.
+**Scratch vs pretrained:** UNetScratch reaches fire dice ~0.89 on CEMS-only and ~0.85 on CEMS+Sen2Fire (DEL), but pretrained SMP (resnet50_unetplusplus) on CEMS+Sen2Fire achieves better generalization (fire IoU 0.78 vs 0.75). Pretrained encoders provide useful spectral and spatial features for satellite imagery.
 
 ### Interpretation and Context
 
