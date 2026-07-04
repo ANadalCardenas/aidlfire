@@ -93,11 +93,16 @@ def scale_to_uint8_per_channel_minmax(x_chw: torch.Tensor) -> np.ndarray:
     c, h, w = x.shape
     out = torch.empty((c, h, w), dtype=torch.uint8)
 
+    # Scale each channel independently (not globally) because the 8 bands have
+    # very different value ranges (reflectance bands vs. NDVI in [-1, 1]) — a
+    # single global min/max would wash out most bands' contrast.
     for i in range(c):
         ch = x[i]
         mn = float(ch.min())
         mx = float(ch.max())
         if mx - mn < 1e-6:
+            # Degenerate case: a perfectly flat channel (e.g. all-zero padding).
+            # Scaling would divide by ~0, so just emit an all-zero channel instead.
             out[i] = torch.zeros_like(ch, dtype=torch.uint8)
         else:
             out[i] = ((ch - mn) / (mx - mn) * 255).clamp(0, 255).to(torch.uint8)
@@ -131,7 +136,12 @@ def bbox_from_binary_mask(binary: np.ndarray) -> tuple[int, int, int, int] | Non
 
 def connected_components_boxes(binary: np.ndarray) -> list[tuple[int, int, int, int]]:
     """
-    One bbox per connected component (blob)
+    One bbox per connected component (blob).
+
+    Unlike bbox_from_binary_mask (one box around ALL positive pixels), this
+    correctly represents a mask with several disjoint fire regions as
+    several separate detection boxes instead of one oversized box spanning
+    the empty space between them.
     """
     from scipy.ndimage import label, find_objects
 
@@ -139,6 +149,9 @@ def connected_components_boxes(binary: np.ndarray) -> list[tuple[int, int, int, 
     if n == 0:
         return []
 
+    # find_objects returns slices with exclusive stop bounds (Python slicing
+    # convention); we convert to inclusive xyxy (stop - 1) to match the rest
+    # of this module's bbox representation.
     slices = find_objects(labeled)
     boxes: list[tuple[int, int, int, int]] = []
     for slc in slices:
@@ -178,6 +191,8 @@ def mask_to_yolo_det_labels(
     h, w = mask_hw.shape
     labels: list[tuple[int, float, float, float, float]] = []
 
+    # range(1, num_classes) deliberately skips class 0 (background) — see the
+    # module docstring: mask value 0 means "no fire" and never needs a box.
     for cls in range(1, num_classes):
         binary = (mask_hw == cls)
         if not binary.any():

@@ -71,7 +71,11 @@ class YOLOInferencePipeline(FireInferencePipeline):
 
         model = YOLO(str(model_path))
 
-        # Extract config from model metadata if available
+        # Extract config from model metadata if available.
+        # YOLO's own "nc" (number of classes) never counts a background class,
+        # since detection has no explicit background label — only "no detection".
+        # We add +1 here so num_classes is comparable to the segmentation models'
+        # convention, where class 0 is background.
         config: dict = {}
         try:
             yaml_cfg = model.model.yaml if hasattr(model.model, "yaml") else {}
@@ -80,6 +84,8 @@ class YOLOInferencePipeline(FireInferencePipeline):
             config["num_classes"] = nc + 1   # +1 to include background class 0
             config["in_channels"] = ch
         except Exception:
+            # Metadata isn't always present (depends on Ultralytics version/checkpoint
+            # format), so fall back to this project's known defaults instead of failing.
             config["num_classes"] = 2
             config["in_channels"] = 8
 
@@ -88,6 +94,9 @@ class YOLOInferencePipeline(FireInferencePipeline):
 
     def _ultralytics_device_str(self) -> str:
         """Convert torch.device to Ultralytics-compatible device string."""
+        # Ultralytics expects a bare GPU index ("0"), not torch's "cuda:0" form,
+        # so this translates whatever torch.device the parent class resolved
+        # into the string format YOLO's predict()/train() calls actually accept.
         dev = str(self.device)
         if dev.startswith("cuda"):
             # "cuda:0" -> "0", "cuda" -> "0"
@@ -113,11 +122,18 @@ class YOLOInferencePipeline(FireInferencePipeline):
             (N, 2, H, W) array of [no-fire, fire] probabilities, None, None
         """
         n, h, w, _ = patches.shape
+        # Pre-allocate a pixel-level probability map per patch so this detection
+        # model's output shape matches the segmentation models' (N, 2, H, W)
+        # convention, letting both share the same stitch_predictions logic.
         all_probs = np.zeros((n, 2, h, w), dtype=np.float32)
         all_probs[:, 0] = 1.0  # Initialize all pixels as no-fire
 
         device_str = self._ultralytics_device_str()
 
+        # YOLO's predict() is called per-patch (not batched) because Ultralytics
+        # results are returned as a list of per-image Results objects with a
+        # variable number of boxes each — looping keeps the box-to-patch mapping
+        # simple instead of having to track offsets into a batched output.
         for i in range(n):
             results = self.model.predict(
                 source=patches[i],   # (H, W, C) float32
@@ -136,16 +152,22 @@ class YOLOInferencePipeline(FireInferencePipeline):
             for j in range(len(boxes)):
                 conf = float(boxes.conf[j].cpu())
                 x1, y1, x2, y2 = boxes.xyxy[j].cpu().numpy().astype(int)
+                # Clip box coordinates to the patch bounds: YOLO can predict
+                # boxes that slightly overshoot the image edges.
                 x1 = max(0, x1)
                 y1 = max(0, y1)
                 x2 = min(w, x2)
                 y2 = min(h, y2)
                 if x2 <= x1 or y2 <= y1:
                     continue
-                # Take the maximum confidence if boxes overlap
+                # Take the maximum confidence if boxes overlap, rather than summing
+                # or overwriting, so a pixel's fire probability reflects the most
+                # confident detection covering it.
                 all_probs[i, 1, y1:y2, x1:x2] = np.maximum(
                     all_probs[i, 1, y1:y2, x1:x2], conf
                 )
+                # Keep the two channels complementary (no-fire = 1 - fire) so
+                # downstream code that expects a proper probability pair still works.
                 all_probs[i, 0, y1:y2, x1:x2] = 1.0 - all_probs[i, 1, y1:y2, x1:x2]
 
         return all_probs, None, None

@@ -74,7 +74,9 @@ def train_and_validate_yolo_det7(
     data_yaml = Path(data_yaml)
     output_dir = Path(output_dir)
 
-    # Resolve device: Ultralytics does not accept "auto" or "mps" as a string
+    # Resolve device: Ultralytics does not accept "auto" or "mps" as a string.
+    # "mps" is folded into this fallback too because Ultralytics' MPS support is
+    # inconsistent across ops/versions, so we prefer CUDA if available, else CPU.
     device = cfg.device
     if device in ("auto", "mps"):
         device = "0" if torch.cuda.is_available() else "cpu"
@@ -126,13 +128,16 @@ def train_and_validate_yolo_det7(
         peak_mem_mb = torch.cuda.max_memory_allocated() / (1024 ** 2)
         device_name = torch.cuda.get_device_name(0)
 
-    # locate best checkpoint
+    # locate best checkpoint: Ultralytics always writes best.pt/last.pt under
+    # <run_dir>/weights/, where run_dir is whatever it decided to name this run.
     run_dir = Path(train_res.save_dir)
     best_ckpt = run_dir / "weights" / "best.pt"
 
     val_dict = getattr(val_res, "results_dict", {}) or {}
 
-    # Compute F1 from precision and recall (not reported directly by Ultralytics)
+    # Compute F1 from precision and recall (not reported directly by Ultralytics).
+    # The 1e-9 epsilon avoids a ZeroDivisionError when both precision and recall
+    # are 0 (e.g. a model that predicts no boxes at all).
     p = val_dict.get("metrics/precision(B)", 0.0)
     r = val_dict.get("metrics/recall(B)", 0.0)
     val_dict["metrics/f1(B)"] = 2 * p * r / (p + r + 1e-9)
