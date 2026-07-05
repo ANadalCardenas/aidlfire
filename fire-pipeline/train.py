@@ -1288,25 +1288,27 @@ def tune_scratch_trainable(config, fixed):
     Ray Tune trainable for ScratchFireModel.
     Reports val_loss (lower is better).
     """
+    # Each trial trains in its own subfolder so trials don't overwrite each other
     trial_dir = fixed["output_dir"] / f"trial_{uuid.uuid4().hex[:8]}"
     trial_dir.mkdir(parents=True, exist_ok=True)
 
+    # config = hyperparameters sampled by Ray Tune for this trial; fixed = everything else
     best_val_f1, best_epoch = train_scratch_classifier(
         patches_dir=fixed["patches_dir"],
         sen2fire_dir=fixed.get("sen2fire_dir"),
         output_dir=trial_dir,
-        batch_size=config.get("batch_size", fixed["batch_size"]),
+        batch_size=fixed["batch_size"],
         num_epochs=fixed["num_epochs"],
-        learning_rate=config.get("learning_rate", fixed["learning_rate"]),
-        weight_decay=config.get("weight_decay", fixed["weight_decay"]),
+        learning_rate=config["learning_rate"],
+        weight_decay=config["weight_decay"],
         num_workers=fixed["num_workers"],
         device=fixed["device"],
-        dropout=config.get("dropout", 0.3),
-        pos_weight=config.get("pos_weight", None),
+        dropout=config["dropout"],
         report_to_tune=True,
         max_batches=fixed.get("max_batches"),
     )
 
+    # Send the trial's result back to Ray Tune so it can rank trials
     ray_report({"val_f1": best_val_f1, "best_epoch": best_epoch})
 
 
@@ -1315,9 +1317,11 @@ def tune_unet_scratch_trainable(config, fixed):
     Ray Tune trainable for UNet from scratch (segmentation).
     Reports best fire_iou (higher is better).
     """
+    # Each trial trains in its own subfolder so trials don't overwrite each other
     trial_dir = fixed["output_dir"] / f"trial_{uuid.uuid4().hex[:8]}"
     trial_dir.mkdir(parents=True, exist_ok=True)
 
+    # config = hyperparameters sampled by Ray Tune for this trial; fixed = everything else
     best_fire_iou, best_epoch = train_unet_scratch_segmentation(
         patches_dir=fixed["patches_dir"],
         sen2fire_dir=fixed.get("sen2fire_dir"),
@@ -1336,6 +1340,7 @@ def tune_unet_scratch_trainable(config, fixed):
         max_batches=fixed.get("max_batches"),
     )
 
+    # Send the trial's result back to Ray Tune so it can rank trials
     ray_report({"fire_iou": best_fire_iou, "best_epoch": best_epoch})
 
 
@@ -1347,9 +1352,11 @@ def tune_yolo_trainable(config, fixed):
     """
     from yolo_runner import train_and_validate_yolo_det7, YoloDetTrainCfg
 
+    # Each trial trains in its own subfolder so trials don't overwrite each other
     trial_dir = fixed["output_dir"] / f"trial_{uuid.uuid4().hex[:8]}"
     trial_dir.mkdir(parents=True, exist_ok=True)
 
+    # config = hyperparameters sampled by Ray Tune for this trial; fixed = everything else
     cfg = YoloDetTrainCfg(
         imgsz=fixed["imgsz"],
         batch=config.get("batch", fixed["batch_size"]),
@@ -1366,6 +1373,7 @@ def tune_yolo_trainable(config, fixed):
         cfg=cfg,
     )
 
+    # Send the trial's result back to Ray Tune so it can rank trials
     map50 = metrics["best_metrics"].get("metrics/mAP50(B)", 0.0)
     ray_report({"map50": map50})
 
@@ -1575,12 +1583,14 @@ def main():
             sys.exit(1)
         
         if args.tune_target == "scratch":
+            # Hyperparameters Ray Tune will search over for the CNN scratch model
             search_space = {
                 "learning_rate": tune.loguniform(5e-5, 5e-4),
                 "weight_decay": tune.loguniform(1e-6, 1e-3),
                 "dropout": tune.choice([0.1, 0.2, 0.3, 0.4]),
             }
 
+            # Everything else the trainable needs but that Ray Tune doesn't sample
             fixed = {
                 "patches_dir": Path(args.patches_dir).resolve(),
                 "sen2fire_dir": Path(args.sen2fire_dir).resolve() if args.sen2fire_dir else None,
@@ -1596,6 +1606,7 @@ def main():
 
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
 
+            # Run the trials (grid mode just runs each sample once instead of repeating it)
             tuner = tune.Tuner(
                 tune.with_resources(
                     tune.with_parameters(tune_scratch_trainable, fixed=fixed),
@@ -1629,20 +1640,19 @@ def main():
                 cfg = result.config
                 best_epoch = int(result.metrics.get("best_epoch", args.epochs - 1))
                 rerun_epochs = max(1, best_epoch + 1)  # epochs are 0-indexed
-                run_name = f"scratch{sen2fire_tag}-tune-top{rank}-lr{cfg['learning_rate']:.1e}-wd{cfg['weight_decay']:.1e}-do{cfg.get('dropout', 0.3):.2f}"
+                run_name = f"scratch{sen2fire_tag}-tune-top{rank}-lr{cfg['learning_rate']:.1e}-wd{cfg['weight_decay']:.1e}-do{cfg['dropout']:.2f}"
                 print(f"\n[Re-run {rank}/{args.tune_top_k}] scratch best config: {cfg} (epochs={rerun_epochs})")
                 train_scratch_classifier(
                     patches_dir=args.patches_dir,
                     sen2fire_dir=args.sen2fire_dir,
                     output_dir=args.output_dir / "scratch_model" / f"best_{rank}",
-                    batch_size=cfg.get("batch_size", args.batch_size),
+                    batch_size=args.batch_size,
                     num_epochs=rerun_epochs,
                     learning_rate=cfg["learning_rate"],
                     weight_decay=cfg["weight_decay"],
                     num_workers=args.num_workers,
                     device=args.device,
-                    dropout=cfg.get("dropout", 0.3),
-                    pos_weight=cfg.get("pos_weight", None),
+                    dropout=cfg["dropout"],
                     wandb_project=wandb_project,
                     wandb_run_name=run_name,
                     results_csv=args.results_csv,
@@ -1650,6 +1660,7 @@ def main():
                     max_batches=5 if args.smoke_test else None,
                     command=launch_command,
                 )
+                # Keep a copy of only the single best (rank 1) checkpoint for easy reuse
                 if rank == 1:
                     ckpt_dir = Path(__file__).parent / "checkpoints"
                     ckpt_dir.mkdir(exist_ok=True)
@@ -1668,6 +1679,7 @@ def main():
                 "weight_decay": tune.loguniform(1e-5, 3e-4),
                 "batch_size": tune.choice([16, 32]),
             }
+            # Everything else the trainable needs but that Ray Tune doesn't sample
             fixed = {
                 "patches_dir": Path(args.patches_dir).resolve(),
                 "sen2fire_dir": Path(args.sen2fire_dir).resolve() if args.sen2fire_dir else None,
@@ -1687,6 +1699,7 @@ def main():
 
             fixed["output_dir"].mkdir(parents=True, exist_ok=True)
 
+            # Run the trials (grid mode just runs each sample once instead of repeating it)
             tuner = tune.Tuner(
                 tune.with_resources(
                     tune.with_parameters(tune_unet_scratch_trainable, fixed=fixed),
@@ -1744,6 +1757,7 @@ def main():
                     max_batches=5 if args.smoke_test else None,
                     command=launch_command,
                 )
+                # Keep a copy of only the single best (rank 1) checkpoint for easy reuse
                 if rank == 1:
                     ckpt_dir = Path(__file__).parent / "checkpoints"
                     ckpt_dir.mkdir(exist_ok=True)
@@ -1786,12 +1800,14 @@ def main():
                 )
 
             yolo_batch_size = args.yolo_batch or args.batch_size
+            # Hyperparameters Ray Tune will search over for YOLO
             search_space = {
                 "lr0": tune.loguniform(5e-4, 1e-2),
                 "weight_decay": tune.loguniform(1e-4, 1e-2),
                 "batch": tune.choice([max(4, yolo_batch_size // 2), yolo_batch_size]),
             }
 
+            # Everything else the trainable needs but that Ray Tune doesn't sample
             fixed = {
                 "patches_dir": Path(args.patches_dir).resolve(),
                 "output_dir": yolo_export_dir.resolve(),
@@ -1809,6 +1825,7 @@ def main():
             # which don't include our 'map50' key. Disable strict checking to allow this.
             os.environ["TUNE_DISABLE_STRICT_METRIC_CHECKING"] = "1"
 
+            # Run the trials (grid mode just runs each sample once instead of repeating it)
             tuner = tune.Tuner(
                 tune.with_resources(
                     tune.with_parameters(tune_yolo_trainable, fixed=fixed),
@@ -1895,6 +1912,7 @@ def main():
                         "num_params": int(metrics["num_params"]),
                         "command": launch_command,
                     })
+                # Keep a copy of only the single best (rank 1) checkpoint for easy reuse
                 if rank == 1:
                     ckpt_dir = Path(__file__).parent / "checkpoints"
                     ckpt_dir.mkdir(exist_ok=True)
