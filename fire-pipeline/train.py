@@ -62,7 +62,6 @@ from scratch_model import ScratchFireModel
 from unet_scratch import UNet
 from metrics import CombinedMetrics
 from constants import get_device, get_device_name, get_class_names
-<<<<<<< HEAD
 
 try:
     from ray import tune
@@ -84,35 +83,7 @@ except ImportError:
 # UTILITIES
 # =============================================================================
 
-def setup_wandb(config: dict, project: str, run_name: str | None = None, wandb_dir: Path | None = None):
-    """Initialize Weights & Biases logging."""
-    try:
-        import os
-        import sys
-
-        # Avoid local ./wandb run cache shadowing the wandb package: ensure
-        # site-packages is searched before cwd when importing wandb
-        if wandb_dir is not None:
-            os.environ.setdefault("WANDB_DIR", str(wandb_dir))
-        site_packages = [p for p in sys.path if "site-packages" in p]
-        if site_packages:
-            sys.path.insert(0, site_packages[0])
-        import wandb
-        if site_packages:
-            sys.path.pop(0)
-
-        wandb.init(
-            project=project,
-            name=run_name,
-            config=config,
-        )
-        return wandb
-    except ImportError:
-        print("Warning: wandb not installed. Install with: pip install wandb")
-        return None
-=======
 from wandb_utils import setup_wandb
->>>>>>> 4bbbec621254b7b1c019a6c00afd1ab0231c8c6f
 
 
 def setup_tensorboard(output_dir: Path) -> SummaryWriter:
@@ -163,11 +134,9 @@ def train_epoch(
     epoch: int,
     metrics: CombinedMetrics,
     *,
-    criterion_severity: nn.Module | None = None,
-    dual_head: bool = False,
     max_batches: int | None = None,
 ) -> dict:
-    """Train for one epoch."""
+    """Train for one epoch (used by unet_scratch and the SMP segmentation models)."""
     model.train()
     metrics.reset()
 
@@ -178,37 +147,30 @@ def train_epoch(
     pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]")
 
     for images, masks in pbar:
+        # Move the batch to the training device (CPU/CUDA/MPS)
         images = images.to(device)
         masks = masks.to(device)
 
+        # Forward pass
         optimizer.zero_grad()
-        if dual_head and isinstance(model, FireDualHeadModel):
-            binary_logits, severity_logits = model(images)
-            mask_binary = (masks > 0).long()
-            result_bin = criterion(binary_logits, mask_binary)
-            loss_bin = result_bin[0] if isinstance(result_bin, tuple) else result_bin
-            result_sev = criterion_severity(severity_logits, masks)
-            loss_sev = result_sev[0] if isinstance(result_sev, tuple) else result_sev
-            loss = loss_bin + loss_sev
-            logits = binary_logits  # metrics on binary for primary
-        else:
-            logits = model(images)
-            result = criterion(logits, masks)
-            if isinstance(result, tuple):
-                loss, components = result
-                for k, v in components.items():
-                    loss_components[k] += v
-            else:
-                loss = result
+        logits = model(images)
 
+        # Compute the loss (criterion may return just a loss, or (loss, components))
+        result = criterion(logits, masks)
+        if isinstance(result, tuple):
+            loss, components = result
+            for k, v in components.items():
+                loss_components[k] += v
+        else:
+            loss = result
+
+        # Backward pass and optimizer step
         loss.backward()
         optimizer.step()
 
+        # Track running metrics for this epoch
         with torch.no_grad():
-            if dual_head and isinstance(model, FireDualHeadModel):
-                metrics.update(binary_logits, (masks > 0).long())
-            else:
-                metrics.update(logits, masks)
+            metrics.update(logits, masks)
 
         total_loss += loss.item()
         num_batches += 1
@@ -218,6 +180,7 @@ def train_epoch(
         if max_batches is not None and num_batches >= max_batches:
             break
 
+    # Average the accumulated metrics/losses over all batches in the epoch
     epoch_metrics = metrics.compute()
     epoch_metrics["loss"] = total_loss / num_batches
     for k, v in loss_components.items():
@@ -235,11 +198,9 @@ def validate_epoch(
     epoch: int,
     metrics: CombinedMetrics,
     *,
-    criterion_severity: nn.Module | None = None,
-    dual_head: bool = False,
     max_batches: int | None = None,
 ) -> dict:
-    """Validate for one epoch."""
+    """Validate for one epoch (used by unet_scratch and the SMP segmentation models)."""
     model.eval()
     metrics.reset()
 
@@ -249,26 +210,22 @@ def validate_epoch(
     pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Val]")
 
     for images, masks in pbar:
+        # Move the batch to the training device (CPU/CUDA/MPS)
         images = images.to(device)
         masks = masks.to(device)
 
-        if dual_head and isinstance(model, FireDualHeadModel):
-            binary_logits, severity_logits = model(images)
-            mask_binary = (masks > 0).long()
-            result_bin = criterion(binary_logits, mask_binary)
-            loss_bin = result_bin[0] if isinstance(result_bin, tuple) else result_bin
-            result_sev = criterion_severity(severity_logits, masks)
-            loss_sev = result_sev[0] if isinstance(result_sev, tuple) else result_sev
-            loss = loss_bin + loss_sev
-            metrics.update(binary_logits, mask_binary)
+        # Forward pass only, no gradients (decorated with @torch.no_grad)
+        logits = model(images)
+
+        # Compute the loss (criterion may return just a loss, or (loss, components))
+        result = criterion(logits, masks)
+        if isinstance(result, tuple):
+            loss, _ = result
         else:
-            logits = model(images)
-            result = criterion(logits, masks)
-            if isinstance(result, tuple):
-                loss, _ = result
-            else:
-                loss = result
-            metrics.update(logits, masks)
+            loss = result
+
+        # Track running metrics for this epoch
+        metrics.update(logits, masks)
 
         total_loss += loss.item()
         num_batches += 1
@@ -278,6 +235,7 @@ def validate_epoch(
         if max_batches is not None and num_batches >= max_batches:
             break
 
+    # Average the accumulated metrics/losses over all batches in the epoch
     epoch_metrics = metrics.compute()
     epoch_metrics["loss"] = total_loss / num_batches
 
@@ -975,13 +933,10 @@ def train(
     resume: Path | None = None,
     use_wandb: bool = True,
     wandb_run_name: str | None = None,
-<<<<<<< HEAD
     use_tensorboard: bool = True,
-=======
     wandb_api_key: str | None = None,
     wandb_offline: bool = False,
     wandb_project: str = "fire-detection",
->>>>>>> 4bbbec621254b7b1c019a6c00afd1ab0231c8c6f
     early_stopping_patience: int = 10,
     save_every: int = 5,
     overwrite_output_dir: bool = False,
@@ -1012,11 +967,8 @@ def train(
         resume: Path to checkpoint to resume from
         use_wandb: Enable W&B logging (default True)
         wandb_run_name: W&B run name
-<<<<<<< HEAD
         use_tensorboard: Enable TensorBoard logging
-=======
         wandb_project: W&B project name
->>>>>>> 4bbbec621254b7b1c019a6c00afd1ab0231c8c6f
         early_stopping_patience: Epochs without improvement before stopping
         save_every: Save checkpoint every N epochs
         use_dual_head: If True, use FireDualHeadModel (binary + severity); requires num_classes=5 (GRA)
@@ -1221,16 +1173,12 @@ def train(
         # Train
         train_results = train_epoch(
             model, train_loader, criterion, optimizer, device, epoch, train_metrics,
-            criterion_severity=criterion_severity,
-            dual_head=use_dual_head,
             max_batches=max_batches,
         )
 
         # Validate
         val_results = validate_epoch(
             model, val_loader, criterion, device, epoch, val_metrics,
-            criterion_severity=criterion_severity,
-            dual_head=use_dual_head,
             max_batches=max_batches,
         )
 
@@ -1624,44 +1572,12 @@ def main():
         help="Run a tiny smoke test: 1 epoch, 2 tune trials, top-1 rerun, 5 batches per epoch",
     )
 
-<<<<<<< HEAD
     # YOLO-specific arguments
     parser.add_argument(
         "--yolo-imgsz",
         type=int,
         default=512,
         help="Image size for YOLO training (default: 512; use 256 to reduce memory on low-RAM machines)",
-=======
-    # Run training
-    train(
-        patches_dir=args.patches_dir,
-        output_dir=args.output_dir,
-        num_classes=args.num_classes,
-        encoder_name=args.encoder,
-        architecture=args.architecture,
-        batch_size=args.batch_size,
-        num_epochs=args.epochs,
-        learning_rate=args.lr,
-        weight_decay=args.weight_decay,
-        use_class_weights=not args.no_class_weights,
-        use_focal_loss=args.focal_loss,
-        focal_gamma=args.focal_gamma,
-        use_weighted_sampling=args.weighted_sampling,
-        fire_sample_weight=args.fire_weight,
-        use_fire_augment=not args.no_fire_augment,
-        num_workers=args.num_workers,
-        device=args.device,
-        resume=args.resume,
-        use_wandb=not args.skip_wandb,
-        wandb_run_name=args.run_name,
-        wandb_api_key=args.wandb_api_key,
-        wandb_offline=args.wandb_offline,
-        wandb_project=args.project,
-        early_stopping_patience=args.patience,
-        save_every=args.save_every,
-        overwrite_output_dir=args.overwrite_output_dir,
-        use_dual_head=args.dual_head,
->>>>>>> 4bbbec621254b7b1c019a6c00afd1ab0231c8c6f
     )
     parser.add_argument(
         "--yolo-batch",
