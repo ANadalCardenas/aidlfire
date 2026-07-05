@@ -1283,40 +1283,6 @@ def train(
 # RAY TUNE TRAINABLES
 # =============================================================================
 
-def tune_trainable(config, fixed):
-    """
-    Minimal Ray Tune trainable: call existing train() once per trial
-    and report final best_metric.
-    """
-    best_metric = train(
-        patches_dir=fixed["patches_dir"],
-        output_dir=fixed["output_dir"] / f"trial_{uuid.uuid4().hex[:8]}",
-        num_classes=fixed["num_classes"],
-        encoder_name=fixed["encoder_name"],
-        architecture=fixed["architecture"],
-        batch_size=config.get("batch_size", fixed["batch_size"]),
-        num_epochs=fixed["num_epochs"],
-        learning_rate=config.get("learning_rate", fixed["learning_rate"]),
-        weight_decay=config.get("weight_decay", fixed["weight_decay"]),
-        use_class_weights=fixed["use_class_weights"],
-        use_focal_loss=fixed["use_focal_loss"],
-        focal_gamma=config.get("focal_gamma", fixed["focal_gamma"]),
-        use_weighted_sampling=fixed["use_weighted_sampling"],
-        fire_sample_weight=fixed["fire_sample_weight"],
-        use_fire_augment=fixed["use_fire_augment"],
-        num_workers=fixed["num_workers"],
-        device=fixed["device"],
-        resume=None,
-        wandb_project=None,
-        wandb_run_name=None,
-        early_stopping_patience=fixed["early_stopping_patience"],
-        save_every=fixed["save_every"],
-        max_batches=fixed.get("max_batches"),
-    )
-
-    ray_report({"fire_iou": best_metric})
-
-
 def tune_scratch_trainable(config, fixed):
     """
     Ray Tune trainable for ScratchFireModel.
@@ -1556,9 +1522,9 @@ def main():
     parser.add_argument(
         "--tune-target",
         type=str,
-        default="seg",
-        choices=["seg", "scratch", "unet_scratch", "yolo"],
-        help="What to tune: segmentation models (seg), CNN scratch (scratch), UNet scratch (unet_scratch), or YOLO (yolo)",
+        default="scratch",
+        choices=["scratch", "unet_scratch", "yolo"],
+        help="What to tune: CNN scratch (scratch), UNet scratch (unet_scratch), or YOLO (yolo)",
     )
     parser.add_argument(
         "--tune-top-k",
@@ -1613,10 +1579,6 @@ def main():
                 "learning_rate": tune.loguniform(5e-5, 5e-4),
                 "weight_decay": tune.loguniform(1e-6, 1e-3),
                 "dropout": tune.choice([0.1, 0.2, 0.3, 0.4]),
-                # optional imbalance tuning (only useful if you know imbalance is large)
-                # "pos_weight": tune.choice([1.0, 2.0, 5.0, 10.0]),
-                # optional batch tuning:
-                # "batch_size": tune.choice([8, 16, 32]),
             }
 
             fixed = {
@@ -1661,7 +1623,7 @@ def main():
                 print("All tuning trials failed. Check error logs in the output directory.")
                 return
             top_k = sorted(valid_results, key=lambda r: -r.metrics.get("val_f1", 0.0))[:args.tune_top_k]
-            wandb_project = args.project if args.wandb else None
+            wandb_project = args.project if (not args.skip_wandb) else None
 
             for rank, result in enumerate(top_k, start=1):
                 cfg = result.config
@@ -1752,7 +1714,7 @@ def main():
                 print("All tuning trials failed. Check error logs in the output directory.")
                 return
             top_k = sorted(valid_results, key=lambda r: -r.metrics.get("fire_iou", 0.0))[:args.tune_top_k]
-            wandb_project = args.project if args.wandb else None
+            wandb_project = args.project if (not args.skip_wandb) else None
 
             for rank, result in enumerate(top_k, start=1):
                 cfg = result.config
@@ -1875,7 +1837,7 @@ def main():
                 print("All tuning trials failed. Check error logs in the output directory.")
                 return
             top_k = sorted(valid_results, key=lambda r: -r.metrics.get("map50", 0.0))[:args.tune_top_k]
-            wandb_project = args.project if args.wandb else None
+            wandb_project = args.project if (not args.skip_wandb) else None
 
             for rank, result in enumerate(top_k, start=1):
                 cfg = result.config
@@ -1942,99 +1904,9 @@ def main():
                         shutil.copy2(src, dst)
                         print(f"Best YOLO checkpoint saved to {dst}")
             return
-
-        # Segmentation tuning
-        if args.tune_mode == "grid":
-            search_space = {
-                "learning_rate": tune.grid_search([5e-5, 1e-4, 2e-4]),
-                "weight_decay": tune.grid_search([1e-5, 1e-4]),
-            }
-        else:
-            search_space = {
-                "learning_rate": tune.loguniform(5e-5, 5e-4),
-                "weight_decay": tune.loguniform(1e-6, 1e-3),
-            }
-            if args.focal_loss:
-                search_space["focal_gamma"] = tune.choice([1.5, 2.0, 2.5])
-
-        # We'll store best results per encoder here
-        best_per_encoder = {}
-
-        # If --all-encoders true -> tune each encoder separately
-        tune_encoders = ENCODER_OPTIONS if train_all_encoders else [args.encoder]
-
-        for encoder in tune_encoders:
-            fixed = {
-                "patches_dir": Path(args.patches_dir).resolve(),
-                "output_dir": (args.output_dir / f"encoder_{encoder}" / "tune"),
-                "num_classes": args.num_classes,
-                "encoder_name": encoder,
-                "architecture": args.architecture,
-                "batch_size": args.batch_size,
-                "num_epochs": args.epochs,
-                "learning_rate": args.lr,
-                "weight_decay": args.weight_decay,
-                "use_class_weights": not args.no_class_weights,
-                "use_focal_loss": args.focal_loss,
-                "focal_gamma": args.focal_gamma,
-                "use_weighted_sampling": args.weighted_sampling,
-                "fire_sample_weight": args.fire_weight,
-                "use_fire_augment": not args.no_fire_augment,
-                "num_workers": args.num_workers,
-                "device": args.device,
-                "early_stopping_patience": args.patience,
-                "save_every": args.save_every,
-                "max_batches": 5 if args.smoke_test else None,
-            }
-
-            fixed["output_dir"].mkdir(parents=True, exist_ok=True)
-
-            print(f"\n\n{'#' * 80}")
-            print(f"TUNING ENCODER: {encoder}")
-            print(f"OUTPUT DIR: {fixed['output_dir']}")
-            print(f"{'#' * 80}\n")
-
-            tuner = tune.Tuner(
-                tune.with_resources(
-                    tune.with_parameters(tune_trainable, fixed=fixed),
-                    resources={"gpu": 1, "cpu": 4},
-                ),
-                param_space=search_space,
-                tune_config=tune.TuneConfig(
-                    metric="fire_iou",
-                    mode="max",
-                    num_samples=args.tune_samples if args.tune_mode == "random" else 1,
-                    max_concurrent_trials=1,
-                ),
-                run_config=RunConfig(
-                    name=f"tune_{encoder}",
-                    storage_path=str(Path(fixed["output_dir"]).resolve()),
-
-                ),
-            )
-
-            results = tuner.fit()
-            best = results.get_best_result(metric="fire_iou", mode="max")
-
-            best_per_encoder[encoder] = {
-                "best_fire_iou": float(best.metrics["fire_iou"]),
-                "best_config": best.config,
-            }
-
-            print("\nBest hyperparameters:", best.config)
-            print("Best Fire IoU:", best.metrics["fire_iou"])
-
-        # Save a global summary JSON
-        summary_path = args.output_dir / "tune_encoder_summary.json"
-        args.output_dir.mkdir(parents=True, exist_ok=True)
-        with open(summary_path, "w") as f:
-            json.dump(best_per_encoder, f, indent=2)
-
-        print("\nSaved tuning summary to:", summary_path)
-        return
     else:
         # Run training without Hyperparameter tuning
-        wandb_project = args.project if args.wandb else None
+        wandb_project = args.project if (not args.skip_wandb) else None
         results = {}
 
     # Skip encoder training if ONLY special models (YOLO/scratch) are requested
@@ -2129,7 +2001,7 @@ def main():
             append_results_csv(args.results_csv, {
                 "dataset": dataset_label,
                 "model_name": "yolo",
-                "wandb_run_name": yolo_run_name if args.wandb else "-",
+                "wandb_run_name": yolo_run_name if (not args.skip_wandb) else "-",
                 "MAP_50_95": yolo_m.get("metrics/mAP50-95(B)", ""),
                 "map_50": yolo_m.get("metrics/mAP50(B)", ""),
                 "val_precision": yolo_m.get("metrics/precision(B)", ""),
@@ -2188,7 +2060,7 @@ def main():
             use_fire_augment=not args.no_fire_augment,
             num_workers=args.num_workers,
             device=args.device,
-            wandb_project=(args.project if args.wandb else None),
+            wandb_project=(args.project if (not args.skip_wandb) else None),
             wandb_run_name=unet_run_name,
             use_tensorboard=args.tensorboard,
             early_stopping_patience=args.patience,
