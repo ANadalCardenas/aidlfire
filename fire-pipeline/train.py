@@ -137,56 +137,56 @@ def train_epoch(
     max_batches: int | None = None,
 ) -> dict:
     """Train for one epoch (used by unet_scratch and the SMP segmentation models)."""
-    model.train()
-    metrics.reset()
+    model.train()  # Pone el modelo en modo entrenamiento (activa dropout, batchnorm en modo "train", etc.)
+    metrics.reset()  # Reinicia los acumuladores de métricas antes de empezar la época
 
-    total_loss = 0
-    loss_components = {"ce_loss": 0, "dice_loss": 0}
-    num_batches = 0
+    total_loss = 0  # Acumulador de la pérdida total sumada a lo largo de la época
+    loss_components = {"ce_loss": 0, "dice_loss": 0}  # Acumuladores de cada componente de la pérdida (cross-entropy, dice)
+    num_batches = 0  # Contador de batches procesados en esta época
 
-    pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]")
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Train]")  # Barra de progreso que envuelve el dataloader
 
-    for images, masks in pbar:
+    for images, masks in pbar:  # Itera sobre cada batch (imágenes de entrada y máscaras de segmentación objetivo)
         # Move the batch to the training device (CPU/CUDA/MPS)
-        images = images.to(device)
-        masks = masks.to(device)
+        images = images.to(device)  # Mueve el tensor de imágenes al dispositivo de cómputo (CPU/CUDA/MPS)
+        masks = masks.to(device)  # Mueve el tensor de máscaras al mismo dispositivo
 
         # Forward pass
-        optimizer.zero_grad()
-        logits = model(images)
+        optimizer.zero_grad()  # Pone a cero los gradientes acumulados de la iteración anterior
+        logits = model(images)  # Ejecuta el modelo sobre las imágenes y obtiene las predicciones (logits)
 
         # Compute the loss (criterion may return just a loss, or (loss, components))
-        result = criterion(logits, masks)
-        if isinstance(result, tuple):
-            loss, components = result
-            for k, v in components.items():
-                loss_components[k] += v
+        result = criterion(logits, masks)  # Calcula la pérdida comparando las predicciones con las máscaras reales
+        if isinstance(result, tuple):  # El criterio puede devolver (pérdida_total, componentes) en vez de un único valor
+            loss, components = result  # Separa la pérdida total de sus componentes individuales
+            for k, v in components.items():  # Recorre cada componente devuelta (p.ej. ce_loss, dice_loss)
+                loss_components[k] += v  # Acumula el valor de esa componente para promediarlo al final de la época
         else:
-            loss = result
+            loss = result  # Si el criterio solo devuelve un escalar, esa es directamente la pérdida total
 
         # Backward pass and optimizer step
-        loss.backward()
-        optimizer.step()
+        loss.backward()  # Retropropaga el error y calcula los gradientes de todos los parámetros del modelo
+        optimizer.step()  # Actualiza los pesos del modelo usando los gradientes calculados
 
         # Track running metrics for this epoch
-        with torch.no_grad():
-            metrics.update(logits, masks)
+        with torch.no_grad():  # Desactiva el seguimiento de gradientes, no hace falta para calcular métricas
+            metrics.update(logits, masks)  # Actualiza los acumuladores de métricas con las predicciones de este batch
 
-        total_loss += loss.item()
-        num_batches += 1
+        total_loss += loss.item()  # Suma el valor escalar de la pérdida de este batch al total de la época
+        num_batches += 1  # Incrementa el contador de batches procesados
 
-        pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        pbar.set_postfix({"loss": f"{loss.item():.4f}"})  # Muestra la pérdida del batch actual en la barra de progreso
 
-        if max_batches is not None and num_batches >= max_batches:
-            break
+        if max_batches is not None and num_batches >= max_batches:  # Límite opcional de batches (útil para pruebas rápidas)
+            break  # Corta el bucle al alcanzar el número máximo de batches indicado
 
     # Average the accumulated metrics/losses over all batches in the epoch
-    epoch_metrics = metrics.compute()
-    epoch_metrics["loss"] = total_loss / num_batches
-    for k, v in loss_components.items():
-        epoch_metrics[k] = v / num_batches
+    epoch_metrics = metrics.compute()  # Calcula las métricas finales agregadas de todos los batches de la época
+    epoch_metrics["loss"] = total_loss / num_batches  # Calcula la pérdida media de la época
+    for k, v in loss_components.items():  # Recorre cada componente de pérdida acumulada
+        epoch_metrics[k] = v / num_batches  # Calcula la media de esa componente a lo largo de la época
 
-    return epoch_metrics
+    return epoch_metrics  # Devuelve el diccionario con las métricas y pérdidas medias de la época
 
 
 @torch.no_grad()
@@ -201,45 +201,45 @@ def validate_epoch(
     max_batches: int | None = None,
 ) -> dict:
     """Validate for one epoch (used by unet_scratch and the SMP segmentation models)."""
-    model.eval()
-    metrics.reset()
+    model.eval()  # Pone el modelo en modo evaluación (desactiva dropout, batchnorm usa estadísticas fijas, etc.)
+    metrics.reset()  # Reinicia los acumuladores de métricas antes de empezar la validación
 
-    total_loss = 0
-    num_batches = 0
+    total_loss = 0  # Acumulador de la pérdida total sumada a lo largo de la época de validación
+    num_batches = 0  # Contador de batches procesados
 
-    pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Val]")
+    pbar = tqdm(dataloader, desc=f"Epoch {epoch} [Val]")  # Barra de progreso que envuelve el dataloader de validación
 
-    for images, masks in pbar:
+    for images, masks in pbar:  # Itera sobre cada batch (imágenes de entrada y máscaras de segmentación objetivo)
         # Move the batch to the training device (CPU/CUDA/MPS)
-        images = images.to(device)
-        masks = masks.to(device)
+        images = images.to(device)  # Mueve el tensor de imágenes al dispositivo de cómputo (CPU/CUDA/MPS)
+        masks = masks.to(device)  # Mueve el tensor de máscaras al mismo dispositivo
 
         # Forward pass only, no gradients (decorated with @torch.no_grad)
-        logits = model(images)
+        logits = model(images)  # Ejecuta el modelo sobre las imágenes y obtiene las predicciones (logits)
 
         # Compute the loss (criterion may return just a loss, or (loss, components))
-        result = criterion(logits, masks)
-        if isinstance(result, tuple):
-            loss, _ = result
+        result = criterion(logits, masks)  # Calcula la pérdida comparando las predicciones con las máscaras reales
+        if isinstance(result, tuple):  # El criterio puede devolver (pérdida_total, componentes) en vez de un único valor
+            loss, _ = result  # Nos quedamos solo con la pérdida total; no se usan las componentes en validación
         else:
-            loss = result
+            loss = result  # Si el criterio solo devuelve un escalar, esa es directamente la pérdida total
 
         # Track running metrics for this epoch
-        metrics.update(logits, masks)
+        metrics.update(logits, masks)  # Actualiza los acumuladores de métricas con las predicciones de este batch
 
-        total_loss += loss.item()
-        num_batches += 1
+        total_loss += loss.item()  # Suma el valor escalar de la pérdida de este batch al total de la época
+        num_batches += 1  # Incrementa el contador de batches procesados
 
-        pbar.set_postfix({"loss": f"{loss.item():.4f}"})
+        pbar.set_postfix({"loss": f"{loss.item():.4f}"})  # Muestra la pérdida del batch actual en la barra de progreso
 
-        if max_batches is not None and num_batches >= max_batches:
-            break
+        if max_batches is not None and num_batches >= max_batches:  # Límite opcional de batches (útil para pruebas rápidas)
+            break  # Corta el bucle al alcanzar el número máximo de batches indicado
 
     # Average the accumulated metrics/losses over all batches in the epoch
-    epoch_metrics = metrics.compute()
-    epoch_metrics["loss"] = total_loss / num_batches
+    epoch_metrics = metrics.compute()  # Calcula las métricas finales agregadas de todos los batches de la época
+    epoch_metrics["loss"] = total_loss / num_batches  # Calcula la pérdida media de la época de validación
 
-    return epoch_metrics
+    return epoch_metrics  # Devuelve el diccionario con las métricas y la pérdida media de la época
 
 def _binary_labels_from_mask(masks: torch.Tensor) -> torch.Tensor:
     """
